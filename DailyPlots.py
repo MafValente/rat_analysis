@@ -110,7 +110,7 @@ makefig1_chrono = load_makefig1_chrono(
 makefig1_data = DataHelpers.normalize_ABL_labels(makefig1_data)
 
 
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
+os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
 
 df = pd.read_csv(subject_file)
 
@@ -401,7 +401,7 @@ def sem(series):
 # ==============================================================
 # === LOAD & FILTER DATA =======================================
 # ==============================================================
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
+os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
 cohort_file = "merged_all_subjects.csv"
 df = pd.read_csv(cohort_file)
 
@@ -730,7 +730,7 @@ def sem(series):
 # ==============================================================
 # === LOAD & FILTER DATA =======================================
 # ==============================================================
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
+os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
 cohort_file = "merged_all_subjects.csv"
 df = pd.read_csv(cohort_file)
 df = df[df["session"] >= 13]

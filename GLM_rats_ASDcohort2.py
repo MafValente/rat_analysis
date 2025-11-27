@@ -29,7 +29,7 @@ print("✅ Loaded R packages: lme4, stats, MuMIn")
 # =======================
 
 print("📂 Loading and preprocessing data...")
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
+os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
 cohort_file = "merged_all_subjects.csv"
 df = pd.read_csv(cohort_file)
 
@@ -76,7 +76,7 @@ out_type = [
     out[out['subject'].isin(het_subj)],
     out[out['subject'].isin(hom_subj)]
 ]
-print("✅ Prepared data subsets (WT/HET/HOM). Currently fitting WT only.")
+print("✅ Prepared data subsets (WT/HET/HOM).")
 
 # ==========================
 # Helpers
@@ -101,7 +101,7 @@ var_group_names = []
 
 if use_current:
     var_group_names.append('current')
-    preds_grouped.append(['ABL','ILD','ILD__ABL','trial','ILD__trial','ILD__fix_time_long'])
+    preds_grouped.append(['ABL','abs_ILD','sign_ILD', 'ILD__ABL','trial','ILD__trial','ILD__fix_time_long'])
 if use_pre:
     var_group_names.append('pre')
     preds_grouped.append(['Pre_choice','ILD__Pre_success','Pre_success__Pre_choice'])
@@ -113,7 +113,7 @@ print(f"✅ Using predictors: {all_fixed_predictors}")
 
 # Full list of random slopes for subject (from MATLAB)
 subject_random_slopes = [
-    'ABL','ILD','ILD__ABL',
+    'ABL','abs_ILD','sign_ILD','ILD__ABL',
     'trial','ILD__trial',
     'Pre_choice','ILD__Pre_success','Pre_success__Pre_choice'
 ]
@@ -152,6 +152,10 @@ for ktype, df_group in enumerate(out_type, start=1):
             # Recenter trial index within this subject+session
             # (MATLAB subtracts nanmean(trial); here we mimic exactly)
             s_df['trial'] = s_df['trial'] - s_df['trial'].mean()
+
+            # Turn ILD into sign and difficulty
+            s_df['abs_ILD'] = s_df['ILD'].abs()
+            s_df['sign_ILD'] = np.sign(s_df['ILD'])
 
             # Pre-trial vars (MATLAB: shift by 1; first row stays NaN initially)
             s_df['Pre_ILD'] = s_df['ILD'].shift(1)
@@ -200,7 +204,7 @@ for ktype, df_group in enumerate(out_type, start=1):
     # ===========================================================
     def prep_for_r_glmm(df):
         fixed = [
-            'ABL','ILD','ILD__ABL','trial','ILD__trial','ILD__fix_time_long',
+            'ABL','abs_ILD','sign_ILD','ILD__ABL','trial','ILD__trial','ILD__fix_time_long',
             'Pre_choice','ILD__Pre_success','Pre_success__Pre_choice'
         ]
         random_groups = ['session', 'subject']

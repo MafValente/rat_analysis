@@ -20,7 +20,7 @@ NORMALIZED_POINTS = 100   # resolution for each session
 #   LOAD DATA
 # ===============================================================
 
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
+os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
 cohort_file = "merged_all_subjects.csv"
 df = pd.read_csv(cohort_file, low_memory=False)
 

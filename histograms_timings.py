@@ -24,7 +24,7 @@ import numpy as np
 #   Setup & data loading
 # ===============================================================
 
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
+os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
 
 subject_file = "merged_ASD0021.csv"
 subject_id = subject_file.removeprefix("merged_").removesuffix(".csv")
@@ -495,10 +495,10 @@ if __name__ == "__main__":
 
 
     # Load merged_all
-    os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
+    os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
     df = pd.read_csv("merged_all_subjects.csv")
     # path to your meta file
-    META_CSV = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2/sex_gen.csv"
+    META_CSV = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/sex_gen.csv"
 
 
     # preprocessing

@@ -14,7 +14,7 @@ import DataHelpers
 .##.....##.########.##.....##..######...########.....######..########..######...######..####..#######..##....##..######.
 """
 def merge_session_files(input_rat, output_dir=None, output_file=None):
-    base_dir = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2/"
+    base_dir = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/"
     input_dir = os.path.join(base_dir, input_rat)
 
     folder_name = os.path.basename(os.path.normpath(input_dir))
@@ -23,22 +23,26 @@ def merge_session_files(input_rat, output_dir=None, output_file=None):
 
     if folder_name == "ASD0013":
         DataHelpers.mark_repeated_from(
-        f"/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2/ASD0013/out_ASD0013_251014.csv",
+        f"/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/ASD0013/out_ASD0013_251014.csv",
             start_trial=6690
     )
         
     if folder_name == "ASD0018":
         DataHelpers.mark_repeated_from(
-        f"/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2/ASD0018/ASD0018_out_251014.csv",
+        f"/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/ASD0018/ASD0018_out_251014.csv",
             start_trial=7370)
         
         DataHelpers.mark_repeated_from(
-        f"/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2/ASD0018/ASD0018_out_251015.csv",
+        f"/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/ASD0018/ASD0018_out_251015.csv",
             start_trial=8000)
 
         DataHelpers.mark_repeated_from(
-        f"/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2/ASD0018/out_ASD0018_251028.csv",
-            start_trial=10900
+        f"/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/ASD0018/out_ASD0018_251028.csv",
+            start_trial=10900)
+        
+        DataHelpers.mark_repeated_from(
+        f"/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/ASD0018/out_ASD0018_251127.csv",
+            start_trial=22250
 
     )
 
@@ -209,7 +213,9 @@ def list_csv_files(input_dir):
 import os
 import pandas as pd
 
-base_dir = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2/"
+base_dir = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/"
+
+#("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTAP2_cohort2", "merged_ASD0007.csv")
 
 model_file = "merged_ASD0007.csv"
 

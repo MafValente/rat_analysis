@@ -57,7 +57,7 @@ if 35 in makefig1_data["ABLS"]:
 # ==============================================================
 # === CONFIG ===================================================
 # ==============================================================
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
+os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
 cohort_file = "merged_all_subjects.csv"
 
 error_mode = "individuals"  # "sem" or "individuals"
@@ -666,7 +666,7 @@ if 35 in makefig1_chrono["plot_abls"]:
 
 # --- Paths / input file ---
 # (leave as-is or override before running)
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
+os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
 cohort_file = "merged_all_subjects.csv"
 
 # --- Analysis choices ---
