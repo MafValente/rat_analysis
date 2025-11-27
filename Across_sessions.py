@@ -1,4 +1,6 @@
 #%%
+
+subject_file = "merged_ASD0022.csv"
 """
 
 
@@ -33,8 +35,8 @@ from matplotlib.ticker import MaxNLocator
 
 colors = ["C0", "C1", "C2", "C3"]
 
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
-subject_file = "merged_ASD0022.csv"
+os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
+
 subject_id = subject_file.removeprefix("merged_").removesuffix(".csv")
 
 # keep in mind level is commented
