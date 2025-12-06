@@ -16,7 +16,7 @@ import DataHelpers
 # --- Load and restrict data ---
 # ================================================================
 
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
+os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
 
 meta = DataHelpers._load_subject_metadata("sex_gen.csv")  # path to your metadata file
 meta = meta.rename(columns={"subject": "animal"})   # ensure merge key matches
@@ -218,7 +218,7 @@ import DataHelpers
 # --- Load and restrict data ---
 # ================================================================
 
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
+os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
 
 meta = DataHelpers._load_subject_metadata("sex_gen.csv")  # path to your metadata file
 meta = meta.rename(columns={"subject": "animal"})   # ensure merge key matches

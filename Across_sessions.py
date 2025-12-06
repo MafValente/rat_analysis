@@ -44,7 +44,7 @@ subject_id = subject_file.removeprefix("merged_").removesuffix(".csv")
 
 df = pd.read_csv(subject_file)
 
-df = df[df["training_level"]==16]
+#df = df[df["training_level"]==16]
 
 #for levels lower than 7, the ABL is doubled
 mask1 = df["training_level"] < 7
@@ -59,16 +59,9 @@ df.loc[mask3, "ABL"] = 50
 # 1) Inspect what you actually have
 print(df["repeated_trial"].astype(str).str.strip().str.upper().value_counts(dropna=False))
 
-# 2) Build a robust FALSE-only mask (keeps only valid trials)
-mask_false = (
-    df["repeated_trial"]
-      .astype(str)
-      .str.strip()
-      .str.upper()
-      .eq("FALSE")
-)
+df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
 
-df_valid = df[mask_false].copy()
+df_valid = df[df["trial_is_repeat"]==False].copy()
 
 # --- Prep session(s) data
 

@@ -1,5 +1,20 @@
 #%%
 
+
+views = [
+    (
+        "hom",
+        lambda d: DataHelpers.restrict_subjects(
+            d,
+            "sex_gen.csv",
+            genotypes="hom",
+            subject_col="animal",
+            genotype_col="genotype",
+            attach_meta=True,
+        ),
+    ),
+]
+
 """
 ..######..####.##....##..######...##.......########....########...#######..##......##
 .##....##..##..###...##.##....##..##.......##..........##.....##.##.....##.##..##..##
@@ -66,20 +81,6 @@ MASK_25_TO_50_WHEN_TL16 = True
 TRAINING_MIN = 16
 SESSION_MIN = 13
 
-views = [
-    (
-        "wt",
-        lambda d: DataHelpers.restrict_subjects(
-            d,
-            "sex_gen.csv",
-            genotypes="wt",
-            subject_col="animal",
-            genotype_col="genotype",
-            attach_meta=True,
-        ),
-    ),
-]
-
 TITLE_FONTSIZE = 24
 LABEL_FONTSIZE = 25
 TICK_FONTSIZE = 24
@@ -107,6 +108,7 @@ SKIP_PSY_FITS = {50}
 # ==============================================================
 df = pd.read_csv(cohort_file)
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
+df = df[df["trial_is_repeat"]==False].copy()
 if "training_level" in df.columns:
     df = df[df["training_level"] >= TRAINING_MIN]
 if "session" in df.columns:
@@ -596,6 +598,21 @@ else:
 
 #%%
 
+# Views
+views = [
+    ("wt", lambda d: DataHelpers.restrict_subjects(
+        d, "sex_gen.csv",  genotypes="wt",
+        subject_col="animal", genotype_col="genotype", attach_meta=True)),
+
+
+    ("het",   lambda d: DataHelpers.restrict_subjects(
+        d, "sex_gen.csv", genotypes="het",
+        subject_col="animal", genotype_col="genotype", attach_meta=True)),
+
+    ("hom",   lambda d: DataHelpers.restrict_subjects(
+        d, "sex_gen.csv", genotypes="hom",
+        subject_col="animal", genotype_col="genotype", attach_meta=True)),
+]
 
 """
 .##.....##.##.....##.##.......########.####....########...#######..##......##
@@ -680,18 +697,6 @@ MASK_59_TO_60 = True
 MASK_25_TO_50_WHEN_TL16 = True
 TRAINING_MIN = 16
 SESSION_MIN  = 13
-
-# Views
-views = [
-    ("Female wt", lambda d: DataHelpers.restrict_subjects(
-        d, "sex_gen.csv", sex="female",  genotypes="wt",
-        subject_col="animal", genotype_col="genotype", attach_meta=True)),
-
-
-    ("Male wt",   lambda d: DataHelpers.restrict_subjects(
-        d, "sex_gen.csv", sex="male", genotypes="wt",
-        subject_col="animal", genotype_col="genotype", attach_meta=True)),
-]
 
 # --- Aesthetic choices copied from make_fig1.py ---
 TITLE_FONTSIZE   = 24

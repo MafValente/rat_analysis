@@ -35,6 +35,67 @@ from scipy.integrate import cumulative_trapezoid as cumtrapz  # SciPy ≥1.14
 
 
 # ---------------------------------------------------------------------
+# For single animals
+# ---------------------------------------------------------------------
+
+def _bootstrap_trials_only(flat_data, xxi, h, B):
+    """
+    Simple bootstrap for single-animal case:
+    flat_data = list of (RT_array, Out_array, MT_array) pooled across sessions/stimuli.
+    """
+    x_all = np.concatenate([rt for rt, _, _ in flat_data])
+    out_all = np.concatenate([out for _, out, _ in flat_data])
+    mt_all = np.concatenate([mt for _, _, mt in flat_data])
+
+    curves_TCM = []
+    curves_MT = []
+    curves_DEN = []
+
+    for b in range(B):
+        # Resample trials only
+        idx = np.random.randint(0, len(x_all), size=len(x_all))
+        x = x_all[idx]
+        y_out = out_all[idx]
+        y_mt = mt_all[idx]
+
+        # Kernel weights
+        z = (xxi[None, :] - x[:, None]) / h
+        Kz = epanechnikov_kernel(z)
+
+        den = Kz.sum(axis=0) / (len(x) * h) + 1e-12
+        num_out = (Kz * y_out[:, None]).sum(axis=0) / (len(x) * h)
+        num_mt = (Kz * y_mt[:, None]).sum(axis=0) / (len(x) * h)
+
+        tcm = num_out / den
+        mt_curve = num_mt / den
+
+        curves_TCM.append(tcm)
+        curves_MT.append(mt_curve)
+        curves_DEN.append(den)
+
+    curves_TCM = np.array(curves_TCM)
+    curves_MT = np.array(curves_MT)
+    curves_DEN = np.array(curves_DEN)
+
+    # cumulative density
+    Zcdf = cumtrapz(curves_DEN, xxi, axis=1, initial=0)
+
+    # summarizer
+    def summarize(arr):
+        med = np.nanmedian(arr, axis=0)
+        q_hi = np.nanquantile(arr, 0.975, axis=0)
+        q_lo = np.nanquantile(arr, 0.025, axis=0)
+        return med, q_hi - med, med - q_lo
+
+    return (
+        summarize(curves_DEN),
+        summarize(curves_TCM),
+        summarize(Zcdf),
+        summarize(curves_MT),
+    )
+
+
+# ---------------------------------------------------------------------
 # Kernel definition
 # ---------------------------------------------------------------------
 
@@ -205,6 +266,22 @@ def hierarchical_bootstrap_joint(data_nested, xxi, h, B):
         nan = np.full(n_grid, np.nan)
         nan_triplet = (nan, nan, nan)
         return nan_triplet, nan_triplet, nan_triplet, nan_triplet
+
+    # --- NEW: If single animal, use simple trial bootstrap ---
+# --- SINGLE ANIMAL CASE ---
+    if n_animals == 1:
+        flat_data = []
+
+        # data_nested = [ [ session1, session2, ... ] ]
+        single = data_nested[0]   # <- list of sessions
+
+        # each session is a list of (RT_array, Out_array, MT_array)
+        for session_trials in single:
+            for (RT_arr, Out_arr, MT_arr) in session_trials:
+                flat_data.append((RT_arr, Out_arr, MT_arr))
+
+        return _bootstrap_trials_only(flat_data, xxi, h, B)
+
 
     for b in range(B):
         RTs_all  = []

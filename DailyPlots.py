@@ -115,7 +115,9 @@ os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_coh
 df = pd.read_csv(subject_file)
 
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
+df = df[df["trial_is_repeat"] == False].copy()
 
+df = df[df["training_level"]==16].copy()
 
 # Prep session data
 df_last = df
@@ -407,7 +409,7 @@ df = pd.read_csv(cohort_file)
 
 df = df[df["training_level"] == 16]
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
-
+df = df[df["trial_is_repeat"]==False].copy()
 
 #Restrict animals, sex, or genotype
 
@@ -736,6 +738,7 @@ df = pd.read_csv(cohort_file)
 df = df[df["session"] >= 13]
 
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
+df = df[df["trial_is_repeat"]==False].copy()
 
 if SETUP_COL not in df.columns:
     raise KeyError(f"'{SETUP_COL}' column not found in dataframe.")

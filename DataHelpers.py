@@ -21,7 +21,7 @@ from scipy.stats import norm
 """
 def prepare_data(
     df,
-    training_level_filter=16,
+    #training_level_filter=16,
     session_col="session",   # <-- change to your real session column name
     trial_col="trial",       # <-- or trial_index if different
 ):
@@ -51,8 +51,8 @@ def prepare_data(
     # ----------------------------
     # 2. ---- FILTER BY LEVEL ----
     # ----------------------------
-    if training_level_filter is not None:
-        df = df[df["training_level"] == training_level_filter].copy()
+    # if training_level_filter is not None:
+    #     df = df[df["training_level"] == training_level_filter].copy()
 
     # ----------------------------
     # 3. ---- MARK REPEATED TRIALS ----

@@ -215,7 +215,7 @@ import pandas as pd
 
 base_dir = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/"
 
-#("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTAP2_cohort2", "merged_ASD0007.csv")
+#merge_subject_files_with_model("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2", "merged_ASD0007.csv")
 
 model_file = "merged_ASD0007.csv"
 
