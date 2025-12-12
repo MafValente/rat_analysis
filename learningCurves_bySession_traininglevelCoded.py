@@ -16,11 +16,27 @@ META_CSV = "sex_gen.csv"
 NORMALIZED_POINTS = 100   # resolution for each session
 # ---------------------
 
+# ==============================================================
+# CONFIG: choose which line you're analyzing
+# ==============================================================
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort2" # or "cohort1", etc
+
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
+
+DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
+
+os.chdir(DATA_DIR)
+
 # ===============================================================
 #   LOAD DATA
 # ===============================================================
 
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
 cohort_file = "merged_all_subjects.csv"
 df = pd.read_csv(cohort_file, low_memory=False)
 
@@ -675,13 +691,27 @@ plot_mean_and_individual_training_colored(df, session_results,
 
 
 """
+# ==============================================================
+# CONFIG: choose which line you're analyzing
+# ==============================================================
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort2" # or "cohort1", etc
 
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
+
+DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
+
+os.chdir(DATA_DIR)
 
 # ===============================================================
 #   LOAD DATA
 # ===============================================================
 
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
 cohort_file = "merged_all_subjects.csv"
 df = pd.read_csv(cohort_file, low_memory=False)
 
@@ -1226,7 +1256,6 @@ def plot_level16_learning(level16_results):
 # 2) Make the figure
 plot_level16_learning(level16_results)
 
-# %%
 #%%
 
 """

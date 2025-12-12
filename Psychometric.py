@@ -68,6 +68,7 @@ def fit_and_plot_psychometric(xData, yData, model,
         n_trials = np.full_like(xData, 50, dtype=int)  # assume 50 per ILD
     else:
         n_trials = np.asarray(n_trials)
+        
 
     # construct data matrix: 3 x N
     data = np.vstack((xData, n_trials, yData))

@@ -3,9 +3,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import os
 from scipy.stats import zscore
 import DataHelpers
+import os
 
 # --- R + rpy2 imports ---
 import rpy2.robjects as ro
@@ -22,13 +22,31 @@ stats = importr("stats")
 MuMIn = importr("MuMIn")   # for R²
 
 print("✅ Loaded R packages: lme4, stats, MuMIn")
+
+# ==============================================================
+# CONFIG: choose which line you're analyzing
+# ==============================================================
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort2" # or "cohort1", etc
+
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
+
+DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
+
+os.chdir(DATA_DIR)
+
 #%%
 # =======================
 # Load and preprocess data
 # =======================
 
 print("📂 Loading and preprocessing data...")
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
+
 cohort_file = "merged_all_subjects.csv"
 df = pd.read_csv(cohort_file)
 

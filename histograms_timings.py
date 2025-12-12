@@ -10,6 +10,8 @@
 ..######..####.##....##..######...########.########...
 """
 
+subject_file = "merged_ASD0021.csv"
+
 # ===============================================================
 #   IMPORTS
 # ===============================================================
@@ -20,13 +22,27 @@ import pandas as pd
 import DataHelpers
 import numpy as np
 
+# ==============================================================
+# CONFIG: choose which line you're analyzing
+# ==============================================================
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort2" # or "cohort1", etc
+
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
+
+DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
+
+os.chdir(DATA_DIR)
+
 # ===============================================================
 #   Setup & data loading
 # ===============================================================
 
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
-
-subject_file = "merged_ASD0021.csv"
 subject_id = subject_file.removeprefix("merged_").removesuffix(".csv")
 
 df = pd.read_csv(subject_file)
@@ -301,6 +317,21 @@ import DataHelpers   # your module
 import os
 import seaborn as sns
 
+# ==============================================================
+# CONFIG: choose which line you're analyzing
+# ==============================================================
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort2" # or "cohort1", etc
+
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
+
+DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
+
 # ===============================================================
 #   GLOBAL BIN WIDTHS FOR ALL COLUMNS
 # ===============================================================
@@ -497,7 +528,7 @@ if __name__ == "__main__":
 
 
     # Load merged_all
-    os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
+    os.chdir(DATA_DIR)
     df = pd.read_csv("merged_all_subjects.csv")
     # path to your meta file
     META_CSV = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/sex_gen.csv"

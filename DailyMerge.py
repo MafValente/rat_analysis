@@ -2,6 +2,8 @@
 import os
 import pandas as pd
 import DataHelpers
+import argparse
+
 
 
 """
@@ -13,35 +15,68 @@ import DataHelpers
 .##.....##.##.......##....##..##....##..##..........##....##.##.......##....##.##....##..##..##.....##.##...###.##....##
 .##.....##.########.##.....##..######...########.....######..########..######...######..####..#######..##....##..######.
 """
-def merge_session_files(input_rat, output_dir=None, output_file=None):
-    base_dir = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/"
+
+
+# ==========================================================
+# CONFIG: where are the data folders for each line/cohort?
+# ==========================================================
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+    ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+    ("SHANK3",  "cohort1"): "SHANK3_cohort1",
+    # add more as needed
+}
+
+def get_base_dir(line="CNTNAP2", cohort="cohort2"):
+    """
+    Return the full base_dir for a given line + cohort.
+    """
+    return os.path.join(BASE_DATA_DIR, LINE_ROOTS[(line, cohort)])
+
+def merge_session_files(input_rat, line="CNTNAP2", cohort="cohort2"):
+
+    """
+    Merge all raw session CSVs for one subject into merged_<rat>.csv
+    for a given line+cohort.
+    """
+        
+    base_dir = get_base_dir(line, cohort)
     input_dir = os.path.join(base_dir, input_rat)
 
     folder_name = os.path.basename(os.path.normpath(input_dir))
     output_dir = base_dir
     output_file = os.path.join(output_dir, f"merged_{folder_name}.csv")
 
+# def merge_session_files(input_rat, output_dir=None, output_file=None):
+#     base_dir = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/"
+#     input_dir = os.path.join(base_dir, input_rat)
+
+#     folder_name = os.path.basename(os.path.normpath(input_dir))
+#     output_dir = base_dir
+#     output_file = os.path.join(output_dir, f"merged_{folder_name}.csv")
+
     if folder_name == "ASD0013":
-        DataHelpers.mark_repeated_from(
-        f"/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/ASD0013/out_ASD0013_251014.csv",
-            start_trial=6690
-    )
+         DataHelpers.mark_repeated_from(
+            os.path.join(base_dir, "ASD0013", "out_ASD0013_251014.csv"),
+            start_trial=6690,
+        )
         
     if folder_name == "ASD0018":
         DataHelpers.mark_repeated_from(
-        f"/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/ASD0018/ASD0018_out_251014.csv",
+        os.path.join(base_dir, "ASD0018", "ASD0018_out_251014.csv"),
             start_trial=7370)
         
         DataHelpers.mark_repeated_from(
-        f"/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/ASD0018/ASD0018_out_251015.csv",
+        os.path.join(base_dir, "ASD0018", "ASD0018_out_251015.csv"),
             start_trial=8000)
 
         DataHelpers.mark_repeated_from(
-        f"/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/ASD0018/out_ASD0018_251028.csv",
+        os.path.join(base_dir, "ASD0018", "out_ASD0018_251028.csv"),
             start_trial=10900)
         
         DataHelpers.mark_repeated_from(
-        f"/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/ASD0018/out_ASD0018_251127.csv",
+        os.path.join(base_dir, "ASD0018", "out_ASD0018_251127.csv"),
             start_trial=22250
 
     )
@@ -144,59 +179,6 @@ def list_csv_files(input_dir):
     return [f for f in os.listdir(input_dir) if f.endswith(".csv")]
 
 
-"""def merge_session_files(input_rat, output_dir=None, output_file=None):
-    base_dir = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2/"
-    input_dir = os.path.join(base_dir, input_rat)
-
-    folder_name = os.path.basename(os.path.normpath(input_dir))
-    output_dir = base_dir
-    output_file = output_dir + f"merged_{folder_name}.csv"
-
-    all_files = list_csv_files(input_dir)
-
-    if not all_files:
-        print("No CSV files found in the directory.")
-        return
-
-    merged_dataframes = []
-    reference_columns = None
-
-    for file in all_files:
-        filepath = os.path.join(input_dir, file)
-        print(f"in {file}")
-        try:
-            df = pd.read_csv(filepath)
-        except Exception as e:
-            print(f"Skipping {file}, could not read CSV: {e}")
-            continue
-
-        # Initialize reference columns
-        if reference_columns is None:
-            reference_columns = list(df.columns)
-            merged_dataframes.append(df)
-            print(f"Using {file} as reference with columns: {reference_columns}")
-        else:
-            if list(df.columns) == reference_columns:
-                merged_dataframes.append(df)
-                print(f"Merged {file}")
-            else:
-                print(f"Skipping {file}, columns don't match reference.")
-
-    if merged_dataframes:
-        merged_df = pd.concat(merged_dataframes, ignore_index=True)
-        merged_df.to_csv(output_file, index=False)
-        print(f"✅ Merged {len(merged_dataframes)} files into {output_file}")
-    else:
-        print("No files with matching columns were merged.")
-
-
-# Reusable function of the coe to list the .csv files in one folder
-def list_csv_files(input_dir):
-    all_files = [f for f in os.listdir(input_dir) if f.endswith(".csv")] 
-    return all_files
-    """
-
-
 
 #%%
 
@@ -213,13 +195,15 @@ def list_csv_files(input_dir):
 import os
 import pandas as pd
 
-base_dir = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/"
+#base_dir = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/"
 
 #merge_subject_files_with_model("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2", "merged_ASD0007.csv")
 
 model_file = "merged_ASD0007.csv"
 
-def merge_subject_files_with_model(base_dir, model_file, output_file=None):
+def merge_subject_files_with_model(line="CNTNAP2", cohort="cohort2",
+                                   model_file="merged_ASD0007.csv",
+                                   output_file=None):
     """
     Merge all subject-level merged CSVs in a directory using a reference model file
     to define column order. Columns not in the model are appended at the end,
@@ -240,8 +224,11 @@ def merge_subject_files_with_model(base_dir, model_file, output_file=None):
         The combined dataframe.
     """
 
+    base_dir = get_base_dir(line, cohort)
+
     # --- find the model file ---
     model_path = model_file if os.path.isabs(model_file) else os.path.join(base_dir, model_file)
+    
     if not os.path.exists(model_path):
         print(f"❌ Model file not found: {model_path}")
         return None
@@ -303,3 +290,37 @@ def merge_subject_files_with_model(base_dir, model_file, output_file=None):
     return merged_df
 
 # %%
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--line",   choices=["CNTNAP2", "SHANK3"], default="CNTNAP2")
+    parser.add_argument("--cohort", default="cohort2")
+    parser.add_argument("--rat",    help="Subject ID, e.g. ASD0007")
+    parser.add_argument(
+        "--mode",
+        choices=["session", "animals", "both"],
+        default="both",
+        help=(
+            "session = merge one rat's raw files\n"
+            "animals     = merge all merged_ASDXXXX into merged_all_subjects\n"
+            "both    = do both steps"
+        ),
+    )
+    parser.add_argument(
+        "--model",
+        default="merged_ASD0007.csv",
+        help="Model file used for all-subject merge",
+    )
+    args = parser.parse_args()
+
+    # if you added get_base_dir earlier:
+    base_dir = get_base_dir(args.line, args.cohort)
+
+    # --- run only what you asked for ---
+    if args.mode in ("session", "both"):
+        if args.rat is None:
+            raise SystemExit("You must pass --rat ASD000X when mode is 'session' or 'both'")
+        merge_session_files(args.rat, base_dir=base_dir)
+
+    if args.mode in ("all", "both"):
+        merge_subject_files_with_model(base_dir=base_dir, model_file=args.model)
