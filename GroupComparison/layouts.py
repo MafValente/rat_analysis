@@ -11,16 +11,18 @@ from .config import ViewSpec, GroupComparisonConfig, PlotStyle, OverlaySpec
 from .plots import (
     style_axes, apply_50_tick_labels,
     plot_rt_on_ax, plot_mt_on_ax, plot_psy_on_ax,
-    add_group_jnd_inset,
+    add_jnd_inset_abl_colored, add_jnd_inset_single_abl
 )
 
-
 def plot_views_3x3(
-    prepared: Dict[str, dict],
-    views: List[ViewSpec],
-    cfg: GroupComparisonConfig,
-    style: PlotStyle,
-    overlay: OverlaySpec,
+    prepared,
+    views,
+    cfg,
+    style,
+    overlay,
+    group_jnd_by_view,
+    view_colors,
+    add_jnd_inset=True,
 ) -> plt.Figure:
     """
     Rows = views (genotypes), Cols = RT/MT/Psy
@@ -64,6 +66,16 @@ def plot_views_3x3(
         apply_50_tick_labels(ax_mt)
         apply_50_tick_labels(ax_psy)
 
+        # JND inset colored by ABL (matches curve colors)
+        if add_jnd_inset:
+            add_jnd_inset_abl_colored(
+                ax_parent=ax_psy,
+                group_jnd_df=group_jnd_by_view.get(vn),
+                abl_colors=abl_colors,
+                style=style,
+                inset_rect=(0.70, 0.15, 0.30, 0.30),
+            )
+
     # legend = ABL colors
     handles, labels = [], []
     for abl, c in abl_colors.items():
@@ -72,6 +84,8 @@ def plot_views_3x3(
 
     fig.legend(handles, labels, loc="upper center", ncol=min(6, len(handles)), fontsize=style.legend_fs)
     fig.tight_layout(rect=[0, 0, 1, 0.92])
+
+
     return fig
 
 
@@ -128,20 +142,21 @@ def plot_abls_4x3(
         apply_50_tick_labels(ax_mt)
         apply_50_tick_labels(ax_psy)
 
+        # inset per ABL psychometric axis (skip ABL 50)
+        if add_inset and (abl != 50):
+            add_jnd_inset_single_abl(
+                ax_parent=ax_psy,
+                group_jnd_by_view=group_jnd_by_view,
+                view_names=view_names,
+                view_colors=view_colors,
+                abl=abl,
+                style=style,
+                inset_rect=(0.70, 0.15, 0.30, 0.30),
+            )
+
     # legend = views
     handles = [plt.Line2D([], [], color=view_colors[vn], marker="o", linestyle="None") for vn in view_names]
     fig.legend(handles, view_names, loc="upper center", ncol=min(6, len(view_names)), fontsize=style.legend_fs)
     fig.tight_layout(rect=[0, 0, 1, 0.92])
-
-    # JND inset: bottom-right psychometric axis
-    if add_inset and len(abl_rows) > 0:
-        ax_inset_parent = axes[-1, 2]
-        add_group_jnd_inset(
-            ax_parent=ax_inset_parent,
-            group_jnd_by_view=group_jnd_by_view,
-            view_names=view_names,
-            view_colors=view_colors,
-            style=style,
-        )
 
     return fig

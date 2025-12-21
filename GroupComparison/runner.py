@@ -48,7 +48,16 @@ def run_groupcomparison(
     figs: Dict[str, plt.Figure] = {}
 
     if layout == "views_3x3":
-        fig_main = plot_views_3x3(prepared, views, cfg, style, overlay)
+        fig_main = plot_views_3x3(
+        prepared=prepared,
+        views=views,
+        cfg=cfg,
+        style=style,
+        overlay=overlay,
+        group_jnd_by_view=group_jnd_by_view,
+        view_colors=view_colors,
+        add_jnd_inset=True,
+    )
         figs["main"] = fig_main
 
         # JND comparison fig: one subplot per view, showing old + new individual points

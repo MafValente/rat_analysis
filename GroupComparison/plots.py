@@ -237,55 +237,163 @@ def plot_jnd_comparison_per_view(
         ax.spines["right"].set_visible(False)
 
 
-def add_group_jnd_inset(
+# def add_group_jnd_inset(
+#     ax_parent,
+#     group_jnd_by_view: Dict[str, "pd.DataFrame"],
+#     view_names: Sequence[str],
+#     view_colors: Dict[str, str],
+#     style: PlotStyle,
+#     inset_rect=(0.72, 0.15, 0.33, 0.33),
+#     x_offsets: Optional[Dict[str, float]] = None,
+# ):
+#     """
+#     Adds an inset with group mean±SEM JNDs for each view.
+#     Uses small x offsets so multiple genotypes at same ABL don't overlap.
+#     """
+
+#     ax_inset = ax_parent.inset_axes(list(inset_rect))
+
+#     if x_offsets is None:
+#         # reasonable defaults for up to 3 views
+#         offs = [-0.25, 0.0, 0.25]
+#         x_offsets = {vn: offs[i % len(offs)] for i, vn in enumerate(view_names)}
+
+#     # Collect all abls present
+#     all_abls = sorted(set().union(*[
+#         set(group_jnd_by_view.get(vn, pd.DataFrame()).get("ABL", []))
+#         for vn in view_names
+#     ]))
+
+#     for vn in view_names:
+#         dfj = group_jnd_by_view.get(vn, pd.DataFrame())
+#         if dfj is None or dfj.empty:
+#             continue
+#         c = view_colors.get(vn, "gray")
+#         off = x_offsets.get(vn, 0.0)
+
+#         for _, row in dfj.iterrows():
+#             ax_inset.errorbar(
+#                 float(row["ABL"]) + off, float(row["mean"]),
+#                 yerr=float(row["sem"]),
+#                 fmt="o",
+#                 color=c,
+#                 markersize=7,
+#                 elinewidth=1.5,
+#                 capsize=4,
+#                 markeredgecolor="black",
+#                 markeredgewidth=1,
+#             )
+
+#     style_axes(ax_inset, style, title=None, xlabel="ABL", ylabel="JND (dB)")
+#     ax_inset.set_xticks(all_abls)
+#     ax_inset.tick_params(axis="both", labelsize=max(8, style.tick_fs - 6))
+#     ax_inset.set_box_aspect(1)
+#     ax_inset.spines["top"].set_visible(False)
+#     ax_inset.spines["right"].set_visible(False)
+#     ax_inset.grid(False)
+
+#     return ax_inset
+
+
+def add_jnd_inset_abl_colored(
     ax_parent,
-    group_jnd_by_view: Dict[str, "pd.DataFrame"],
-    view_names: Sequence[str],
-    view_colors: Dict[str, str],
+    group_jnd_df,
+    abl_colors: dict,
     style: PlotStyle,
-    inset_rect=(0.72, 0.15, 0.33, 0.33),
-    x_offsets: Optional[Dict[str, float]] = None,
+    inset_rect=(0.70, 0.15, 0.30, 0.30),
 ):
     """
-    Adds an inset with group mean±SEM JNDs for each view.
-    Uses small x offsets so multiple genotypes at same ABL don't overlap.
+    Inset for views_3x3: shows group mean±SEM JND for all ABLs,
+    dot color matches the ABL curve colors.
     """
+    import pandas as pd
 
     ax_inset = ax_parent.inset_axes(list(inset_rect))
 
-    if x_offsets is None:
-        # reasonable defaults for up to 3 views
-        offs = [-0.25, 0.0, 0.25]
-        x_offsets = {vn: offs[i % len(offs)] for i, vn in enumerate(view_names)}
+    if group_jnd_df is None or getattr(group_jnd_df, "empty", True):
+        style_axes(ax_inset, style, title=None, xlabel="ABL", ylabel="JND (dB)")
+        ax_inset.set_xticks([])
+        ax_inset.set_box_aspect(1)
+        ax_inset.spines["top"].set_visible(False)
+        ax_inset.spines["right"].set_visible(False)
+        return ax_inset
 
-    # Collect all abls present
-    all_abls = sorted(set().union(*[
-        set(group_jnd_by_view.get(vn, pd.DataFrame()).get("ABL", []))
-        for vn in view_names
-    ]))
+    for _, row in group_jnd_df.iterrows():
+        abl = int(row["ABL"])
+        c = abl_colors.get(abl, "gray")
+        ax_inset.errorbar(
+            abl, float(row["mean"]),
+            yerr=float(row["sem"]),
+            fmt="o",
+            color=c,
+            markersize=7,
+            elinewidth=1.5,
+            capsize=4,
+            markeredgecolor="black",
+            markeredgewidth=1,
+        )
 
+    abls = sorted(set(int(x) for x in group_jnd_df["ABL"].unique()))
+    style_axes(ax_inset, style, title=None, xlabel="ABL", ylabel="JND (dB)")
+    ax_inset.set_xticks(abls)
+    ax_inset.tick_params(axis="both", labelsize=max(8, style.tick_fs - 6))
+    ax_inset.set_box_aspect(1)
+    ax_inset.spines["top"].set_visible(False)
+    ax_inset.spines["right"].set_visible(False)
+    ax_inset.grid(False)
+    return ax_inset
+
+
+def add_jnd_inset_single_abl(
+    ax_parent,
+    group_jnd_by_view: dict,
+    view_names,
+    view_colors: dict,
+    abl: int,
+    style: PlotStyle,
+    inset_rect=(0.70, 0.15, 0.30, 0.30),
+):
+    """
+    Inset for abls_4x3: shows ONLY the JND for this row's ABL (one per genotype/view if available).
+    """
+    import pandas as pd
+
+    ax_inset = ax_parent.inset_axes(list(inset_rect))
+
+    # x offsets for multiple genotypes at the same ABL
+    offs = [-0.25, 0.0, 0.25]
+    x_offsets = {vn: offs[i % len(offs)] for i, vn in enumerate(view_names)}
+
+    plotted_any = False
     for vn in view_names:
-        dfj = group_jnd_by_view.get(vn, pd.DataFrame())
-        if dfj is None or dfj.empty:
+        dfj = group_jnd_by_view.get(vn)
+        if dfj is None or getattr(dfj, "empty", True):
             continue
-        c = view_colors.get(vn, "gray")
-        off = x_offsets.get(vn, 0.0)
 
-        for _, row in dfj.iterrows():
-            ax_inset.errorbar(
-                float(row["ABL"]) + off, float(row["mean"]),
-                yerr=float(row["sem"]),
-                fmt="o",
-                color=c,
-                markersize=7,
-                elinewidth=1.5,
-                capsize=4,
-                markeredgecolor="black",
-                markeredgewidth=1,
-            )
+        sub = dfj[dfj["ABL"] == abl]
+        if sub.empty:
+            continue
+
+        row = sub.iloc[0]
+        c = view_colors.get(vn, "gray")
+        x = float(abl) + float(x_offsets.get(vn, 0.0))
+
+        ax_inset.errorbar(
+            x, float(row["mean"]),
+            yerr=float(row["sem"]),
+            fmt="o",
+            color=c,
+            markersize=7,
+            elinewidth=1.5,
+            capsize=4,
+            markeredgecolor="black",
+            markeredgewidth=1,
+        )
+        plotted_any = True
 
     style_axes(ax_inset, style, title=None, xlabel="ABL", ylabel="JND (dB)")
-    ax_inset.set_xticks(all_abls)
+    ax_inset.set_xticks([abl])
+    ax_inset.set_xlim(abl - 1, abl + 1)
     ax_inset.tick_params(axis="both", labelsize=max(8, style.tick_fs - 6))
     ax_inset.set_box_aspect(1)
     ax_inset.spines["top"].set_visible(False)
