@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import Psychometric 
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 import matplotlib as mpl
 import pickle
 
@@ -331,7 +331,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import Psychometric 
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 import matplotlib as mpl
 
 """
@@ -670,7 +670,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import Psychometric
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 
 """
 =============================================================

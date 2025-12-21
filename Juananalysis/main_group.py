@@ -5,7 +5,7 @@ import sys
 sys.path.append("/Users/mafaldavalente/Documents/Mafalda_analysis/Juananalysis")
 sys.path.append("/Users/mafaldavalente/Documents/Mafalda_analysis")
 
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 from load_data import load_behavior_csv
 from plot_results import shaded_curve
 import os

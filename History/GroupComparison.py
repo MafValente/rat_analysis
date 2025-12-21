@@ -7,7 +7,7 @@ import matplotlib as mpl
 import matplotlib.font_manager as fm
 import pickle
 import Psychometric
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 import os
@@ -624,7 +624,7 @@ import matplotlib as mpl
 import matplotlib.font_manager as fm
 import pickle
 import Psychometric
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 
 # ==============================================================
 # CONFIG: choose which line you're analyzing
@@ -645,18 +645,18 @@ os.chdir(DATA_DIR)
 
 # Views
 views = [
-    ("female", lambda d: DataHelpers.restrict_subjects(
-        d, "sex_gen.csv",  genotypes="wt", sex = "female",
+    ("wt", lambda d: DataHelpers.restrict_subjects(
+        d, "sex_gen.csv",  genotypes="wt",
         subject_col="animal", genotype_col="genotype", attach_meta=True)),
 
 
-    ("male",   lambda d: DataHelpers.restrict_subjects(
-        d, "sex_gen.csv", genotypes="wt", sex = "male",
+    ("het",   lambda d: DataHelpers.restrict_subjects(
+        d, "sex_gen.csv", genotypes="het", 
         subject_col="animal", genotype_col="genotype", attach_meta=True)),
 
-    # ("hom",   lambda d: DataHelpers.restrict_subjects(
-    #     d, "sex_gen.csv", genotypes="hom",
-    #     subject_col="animal", genotype_col="genotype", attach_meta=True)),
+    ("hom",   lambda d: DataHelpers.restrict_subjects(
+        d, "sex_gen.csv", genotypes="hom",
+        subject_col="animal", genotype_col="genotype", attach_meta=True)),
 ]
 
 """

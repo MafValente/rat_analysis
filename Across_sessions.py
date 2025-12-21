@@ -5,10 +5,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import Psychometric 
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 from matplotlib.ticker import MaxNLocator
 
-subject_file = "merged_ASD0022.csv"
+subject_file = "merged_ASD0021.csv"
 
 """
 
@@ -60,7 +60,7 @@ print(df["repeated_trial"].astype(str).str.strip().str.upper().value_counts(drop
 # --- Prep session(s) data
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
 
-#df = df[df["training_level"]==16].copy()
+df = df[df["training_level"]==16].copy()
 
 df_valid = df[df["trial_is_repeat"]==False].copy()
 
@@ -155,7 +155,6 @@ completedTrial_count_summary = DataHelpers.count_trials(df_valid, df_valid["succ
 CNPA_count_summary = DataHelpers.count_trials(df, df["abort_type"] == "CNP", "cnp")
 A_count_summary = DataHelpers.count_trials(df, (df["abort_type"] != "CNP") & (df["success"] == 0), "aborted")
 
-#%%
 #----- plotting
 
 fig = plt.figure()

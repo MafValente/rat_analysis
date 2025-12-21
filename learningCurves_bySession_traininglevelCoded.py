@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 
 # --- CONFIGURATION ---
 SUBJECT_COL = 'animal'
@@ -19,8 +19,8 @@ NORMALIZED_POINTS = 100   # resolution for each session
 # ==============================================================
 # CONFIG: choose which line you're analyzing
 # ==============================================================
-LINE = "CNTNAP2"   # or "SHANK3"
-COHORT = "cohort2" # or "cohort1", etc
+LINE = "SHANK3"   # or "SHANK3"
+COHORT = "cohort1" # or "cohort1", etc
 
 BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 
@@ -601,7 +601,7 @@ def plot_mean_and_individual_training_colored(df, session_results,
                     Ys[i:i+2],
                     color=indiv_cmap(Lnorm[i]),
                     linewidth=.5,
-                    alpha=0.15
+                    alpha=0.45
                 )
 
         # -------------------------------------------------------
@@ -1272,7 +1272,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import os
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 
 
 # =======================
@@ -1285,7 +1285,24 @@ TIME_COL    = "tared_trial_start"  # <-- CHANGE THIS to your actual time column
 META_CSV    = "sex_gen.csv"
 
 
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2")
+
+# ==============================================================
+# CONFIG: choose which line you're analyzing
+# ==============================================================
+LINE = "SHANK3"   # or "SHANK3"
+COHORT = "cohort1" # or "cohort1", etc
+
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
+
+DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
+
+os.chdir(DATA_DIR)
+
 df = pd.read_csv("merged_all_subjects.csv", low_memory=False)
 
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")

@@ -15,7 +15,7 @@ import matplotlib as mpl
 import matplotlib.font_manager as fm
 import pickle
 import Psychometric
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 
 # Old Data overlay
 

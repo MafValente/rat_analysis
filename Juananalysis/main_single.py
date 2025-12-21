@@ -15,7 +15,7 @@ from kernel_regression import (
     build_hierarchical_data_full,
     hierarchical_bootstrap_joint,
 )
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 
 # ----------------------------------------------------------
 # CONFIG

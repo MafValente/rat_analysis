@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import os
 import pandas as pd
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 import numpy as np
 
 # ==============================================================
@@ -313,7 +313,7 @@ plt.show()
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import DataHelpers   # your module
+import Helpers.DataHelpers as DataHelpers   # your module
 import os
 import seaborn as sns
 

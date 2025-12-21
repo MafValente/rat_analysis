@@ -4,6 +4,8 @@ from psychofit import mle_fit_psycho, weibull, weibull50, erf_psycho, erf_psycho
 from scipy.optimize import curve_fit
 from scipy.special import erf
 
+MIN_ILD_POINTS_FOR_FIT = 4
+
 def erf_4par(x, alpha, beta, gamma, lambda_):
     """4-parameter cumulative Gaussian psychometric function."""
     return gamma + (1 - gamma - lambda_) * 0.5 * (1 + erf((x - alpha) / (beta * np.sqrt(2))))
@@ -177,7 +179,7 @@ def fit_and_plot_psychometric(xData, yData, model,
 # ------------------------
 # Higher-level function: psychometrics by ABL
 
-def compute_psychometrics_by_ABL(df_last, model="my_psycho"):
+def compute_psychometrics_by_ABL(df_last, model="my_psycho", min_ilds_for_fit=4):
     """
     Compute psychometric fits separated by ABL.
 
@@ -207,31 +209,40 @@ def compute_psychometrics_by_ABL(df_last, model="my_psycho"):
         print(f"\nABL={abl}, n_trials={len(df_sub)}")
 
         ILDs = np.sort(df_sub["ILD"].unique())
-        #print("  ILDs:", ILDs)
+
+        # Always compute POINTS if there are any ILDs at all
         if len(ILDs) == 0:
             print("  ⚠️ Skipping ABL because no ILDs found")
             continue
 
+
         PropLeft = np.array([
-        (((df_sub["ILD"] == ild) & (df_sub["success"] == 1)).sum()) /
-        (((df_sub["ILD"] == ild) & (df_sub["success"] != 0)).sum())
-        for ild in ILDs
-        ])
+            (((df_sub["ILD"] == ild) & (df_sub["success"] == 1)).sum()) /
+            (((df_sub["ILD"] == ild) & (df_sub["success"] != 0)).sum())
+            for ild in ILDs
+        ], dtype=float)
 
-
-        # Flip for negative ILDs
+        # Flip for negative ILDs (keep your behavior)
         PropLeft = np.where(ILDs < 0, 1 - PropLeft, PropLeft)
 
-        # Number of trials
-        n_trials = np.array([(df_sub["ILD"] == ild).sum() for ild in ILDs])
+        n_trials = np.array([(df_sub["ILD"] == ild).sum() for ild in ILDs], dtype=int)
 
-        # Fit (no plotting here)
-        pars, L, xx, yy = fit_and_plot_psychometric(
-            ILDs, PropLeft,
-            model=model,
-            n_trials=n_trials,
-            show_plot=False)
-        
+        # Default: no fit
+        pars, L, xx, yy = None, np.nan, None, None
+
+# Fit ONLY if enough ILDs (your rule)
+        if len(ILDs) >= min_ilds_for_fit and np.isfinite(PropLeft).all():
+            try:
+                pars, L, xx, yy = fit_and_plot_psychometric(
+                    ILDs, PropLeft,
+                    model=model,
+                    n_trials=n_trials,
+                    show_plot=False,
+                )
+            except Exception:
+                # keep points; just no fit
+                pars, L, xx, yy = None, np.nan, None, None
+
         results[abl] = {
             "ILDs": ILDs,
             "PropLeft": PropLeft,
@@ -239,7 +250,8 @@ def compute_psychometrics_by_ABL(df_last, model="my_psycho"):
             "pars": pars,
             "L": L,
             "xx": xx,
-            "yy": yy}
+            "yy": yy,
+        }
 
     return results
 

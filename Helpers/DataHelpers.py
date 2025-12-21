@@ -45,8 +45,11 @@ def prepare_data(
     mask2 = df["ABL"] == 59
     df.loc[mask2, "ABL"] = 60
 
-    mask3 = (df["training_level"] == 16) & (df["ABL"] == 25)
-    df.loc[mask3, "ABL"] = 50
+    mask3 = df["ABL"] == 58
+    df.loc[mask3, "ABL"] = 60
+
+    mask4 = (df["training_level"] == 16) & (df["ABL"] == 25)
+    df.loc[mask4, "ABL"] = 50
 
     # ----------------------------
     # 2. ---- FILTER BY LEVEL ----
@@ -86,6 +89,37 @@ def prepare_data(
             if prev_triggers_repeat:
                 df.loc[this_idx, "trial_is_repeat"] = True
 
+    return df
+
+
+
+
+#prep data for the short durations
+
+DUR_RULES = [(12, 16, 15), (17, 21, 60), (22, 26, 120)]
+RT_MS = 6000
+
+def add_stim_dur(df, sound_col="sound_index", session_col="session_type",
+                 out_col="stim_dur", type1_value=RT_MS):  # set to pd.NA for NaN behavior
+    df = df.copy()
+
+    # default for everything (type1 -> RT_MS, or pd.NA if you prefer)
+    df[out_col] = pd.Series([type1_value] * len(df), index=df.index, dtype="Int64")
+
+    # only compute mapping for session_type == 2 (and only if column exists)
+    if session_col in df.columns:
+        mask = pd.to_numeric(df[session_col], errors="coerce") == 2
+    else:
+        mask = pd.Series(False, index=df.index)
+
+    if mask.any():
+        s = pd.to_numeric(df.loc[mask, sound_col], errors="coerce")
+        conds = [s.between(lo, hi) for lo, hi, _ in DUR_RULES]
+        choices = [dur for _, _, dur in DUR_RULES]
+        df.loc[mask, out_col] = pd.Series(np.select(conds, choices, default=RT_MS), index=df.loc[mask].index).astype("Int64")
+
+    # optional label column
+    df["stim_dur_label"] = np.where(df[out_col] == RT_MS, "RT", df[out_col].astype(str) + "ms")
     return df
 
 

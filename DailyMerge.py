@@ -1,7 +1,7 @@
 #%%
 import os
 import pandas as pd
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 import argparse
 
 
@@ -120,6 +120,16 @@ def merge_session_files(input_rat, line="CNTNAP2", cohort="cohort2"):
             df = pd.read_csv(filepath)
             # reindex to ensure all columns exist, fill missing with NaN
             df = df.reindex(columns=all_columns)
+
+            # add stim duration annotation (safe to do here)
+            df = DataHelpers.add_stim_dur(
+                df,
+                sound_col="sound_index",
+                session_col="session_type",
+                out_col="stim_dur",
+                type1_value=6000,  # or pd.NA
+            )
+
             df["__source_file"] = file
             df["__session_sort_key"] = DataHelpers._infer_file_date(filepath)  # <-- now from name out_YYMMDD
             df["__session_mtime"] = os.path.getmtime(filepath)

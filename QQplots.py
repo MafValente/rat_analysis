@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 
 # ==============================================================
 # CONFIG: choose which line you're analyzing
