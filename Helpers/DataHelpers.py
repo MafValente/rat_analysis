@@ -1158,32 +1158,41 @@ def overlay_makefig1_psychometrics(ax, plot_data, abl=None, color="black", show_
         ax.plot(x_smooth, sigmoid(x_smooth, *mean_params_dict[abls_to_use[0]]), color=color, linewidth=3, zorder=2)
     
 def extract_rt_points(chrono_data, abl):
-
-    #Extract mean and SEM reaction time (RT) data for a given ABL from the make_fig1 chronometric pickle.
-
     grand_means_data = chrono_data["grand_means_data"]
     if abl not in grand_means_data:
         return None
 
-    stats = grand_means_data[abl]
+    stats = grand_means_data[abl]  # in your pickle this is a DataFrame
     x = np.array(stats["abs_ILD"], dtype=float)
     y = np.array(stats["mean"], dtype=float)
     sem = np.array(stats["sem"], dtype=float)
-    return x, y, sem
 
-def overlay_makefig1_rt(ax, abl, chrono_data, color="black", zorder=-1):
+    # Sort by x (prevents weird zig-zag lines if order ever differs)
+    order = np.argsort(x)
+    return x[order], y[order], sem[order]
 
-    #Overlay mean RT ± SEM from make_fig1 chronometric data onto the current axis.
-    #Drawn behind the colored cohort data.
 
+def overlay_makefig1_rt(ax, abl, chrono_data, color="black", zorder=-1, y_scale=1.0):
+    """Overlay mean RT ± SEM from make_fig1 chronometric pickle."""
     out = extract_rt_points(chrono_data, abl)
     if out is None:
         return
-    x, y, sem = out
 
-    # Overlay black line and points behind
-    ax.errorbar(x, y, yerr=sem, fmt='o', color=color, markersize=8.5,
-                linewidth=0, elinewidth=1.5, capsize=3, zorder=zorder)
+    x, y, sem = out
+    y = y * y_scale
+    sem = sem * y_scale
+
+    # Match legacy look: no caps (capsize=0) :contentReference[oaicite:1]{index=1}
+    ax.errorbar(
+        x, y, yerr=sem,
+        fmt="o",
+        color=color,
+        markersize=8.5,
+        linewidth=0,
+        elinewidth=1.5,
+        capsize=0,
+        zorder=zorder,
+    )
     ax.plot(x, y, color=color, linewidth=2.5, zorder=zorder)
 
 

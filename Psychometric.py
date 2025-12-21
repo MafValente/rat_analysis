@@ -206,7 +206,7 @@ def compute_psychometrics_by_ABL(df_last, model="my_psycho", min_ilds_for_fit=4)
 
     for abl in sorted(df_last["ABL"].unique()):
         df_sub = df_last[df_last["ABL"] == abl]
-        print(f"\nABL={abl}, n_trials={len(df_sub)}")
+        # print(f"\nABL={abl}, n_trials={len(df_sub)}")
 
         ILDs = np.sort(df_sub["ILD"].unique())
 
