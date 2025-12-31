@@ -142,18 +142,6 @@ def plot_abls_4x3(
         apply_50_tick_labels(ax_mt)
         apply_50_tick_labels(ax_psy)
 
-        # inset per ABL psychometric axis (skip ABL 50)
-        if add_inset and (abl != 50):
-            add_jnd_inset_single_abl(
-                ax_parent=ax_psy,
-                group_jnd_by_view=group_jnd_by_view,
-                view_names=view_names,
-                view_colors=view_colors,
-                abl=abl,
-                style=style,
-                inset_rect=(0.70, 0.15, 0.30, 0.30),
-            )
-
     # legend = views
     handles = [plt.Line2D([], [], color=view_colors[vn], marker="o", linestyle="None") for vn in view_names]
     fig.legend(handles, view_names, loc="upper center", ncol=min(6, len(view_names)), fontsize=style.legend_fs)

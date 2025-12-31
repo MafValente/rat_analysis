@@ -2,13 +2,14 @@
 import pickle
 import matplotlib as mpl
 
-from config import (
-    ViewSpec, FilterConfig, PlotStyle, GroupComparisonConfig,
-    OverlaySpec, JNDOverlaySpec
-)
 import os, sys
 os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis")
 sys.path.insert(0, os.getcwd())
+
+from GroupComparison.config import (
+    ViewSpec, FilterConfig, PlotStyle, GroupComparisonConfig,
+    OverlaySpec, JNDOverlaySpec
+)
 
 from GroupComparison.runner import run_groupcomparison
 import Helpers.DataHelpers as DataHelpers
