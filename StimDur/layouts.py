@@ -61,10 +61,20 @@ def plot_stimdur_4x3_for_view(
         apply_50_tick_labels(ax_psy, cfg.xlim_sym)
 
     # legend: stim_dur
+
+    pretty = {
+    "15": "SD = 15 ms",
+    "60": "SD = 60 ms",
+    "120": "SD = 120 ms",
+    "6000": "SD = RT",
+}
+
+    legend_labels = [pretty.get(nm, str(nm)) for nm in names]
+
     handles = [
         plt.Line2D([], [], color=stimdur_colors[nm], marker="o", linestyle="None")
         for nm in names
     ]
-    fig.legend(handles, names, loc="upper right", fontsize=style.legend_fs)
+    fig.legend(handles, legend_labels, loc="upper right", fontsize=style.legend_fs)
     fig.tight_layout(rect=[0, 0, 0.92, 1])
     return fig
