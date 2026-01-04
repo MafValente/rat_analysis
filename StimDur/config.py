@@ -47,7 +47,7 @@ class PlotStyle:
 
 @dataclass(frozen=True)
 class StimDurComparisonConfig:
-    error_mode: str = "individuals"     # "individuals" or "sem"
+    error_mode: str = "sem"     # "individuals" or "sem"
     skip_psy_fits: tuple[int, ...] = (50,)
     xlim_sym: tuple[float, float] = (-18.5, 18.5)
     xlim_abs: tuple[float, float] = (0, 19)

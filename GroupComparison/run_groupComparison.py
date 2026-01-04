@@ -1,7 +1,6 @@
 #%%
 import pickle
 import matplotlib as mpl
-
 import os, sys
 os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis")
 sys.path.insert(0, os.getcwd())

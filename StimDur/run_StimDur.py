@@ -1,3 +1,4 @@
+
 #%%
 # run_stimdurComparison.py
 # ==============================================================
@@ -11,6 +12,7 @@
 import os, sys
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import pandas as pd
 
 # --------------------------------------------------------------
 # Project root on path (same style as GroupComparison)
@@ -29,6 +31,7 @@ from StimDur.config import (
     make_stimdur_specs
 )
 from StimDur.runner import run_stimdur_comparison
+from StimDur.layouts import plot_genotypes_4x3_for_stimdur
 
 
 # ----------------- paths -----------------
@@ -52,28 +55,44 @@ mpl.rcParams["font.family"] = "sans-serif"
 mpl.rcParams["font.sans-serif"] = ["Helvetica Neue", "Helvetica", "Arial", "sans-serif"]
 
 
-# ----------------- views (genotype selectors) -----------------
-# EXACTLY like your GroupComparison runner
-views = [
-    ViewSpec("wt",  lambda d: DataHelpers.restrict_subjects(
-        d, "sex_gen.csv",
-        genotypes="wt",
-        subject_col="animal", genotype_col="genotype",
-        attach_meta=True
-    )),
-    ViewSpec("het", lambda d: DataHelpers.restrict_subjects(
-        d, "sex_gen.csv",
-        genotypes="het",
-        subject_col="animal", genotype_col="genotype",
-        attach_meta=True
-    )),
-    ViewSpec("hom", lambda d: DataHelpers.restrict_subjects(
-        d, "sex_gen.csv",
-        genotypes="hom",
-        subject_col="animal", genotype_col="genotype",
-        attach_meta=True
-    )),
-]
+# ----------------- views (genotype/animal selectors) -----------------
+
+animals = (
+    pd.read_csv(COHORT_CSV, usecols=["animal"])["animal"]
+    .dropna()
+    .astype(str)
+    .unique()
+)
+
+if len(animals) == 1:
+    ANIMAL = animals[0]
+    views = [
+        ViewSpec(
+            str(ANIMAL),
+            lambda d, a=ANIMAL: d[d["animal"].astype(str) == a].copy()
+        )
+    ]
+else:
+    views = [
+        ViewSpec("wt",  lambda d: DataHelpers.restrict_subjects(
+            d, "sex_gen.csv",
+            genotypes="wt",
+            subject_col="animal", genotype_col="genotype",
+            attach_meta=True
+        )),
+        ViewSpec("het", lambda d: DataHelpers.restrict_subjects(
+            d, "sex_gen.csv",
+            genotypes="het",
+            subject_col="animal", genotype_col="genotype",
+            attach_meta=True
+        )),
+        ViewSpec("hom", lambda d: DataHelpers.restrict_subjects(
+            d, "sex_gen.csv",
+            genotypes="hom",
+            subject_col="animal", genotype_col="genotype",
+            attach_meta=True
+        )),
+    ]
 
 
 # ----------------- stim_dur traces -----------------
@@ -83,8 +102,11 @@ STIM_DURS = [15, 60, 120, 6000]
 
 stimdur_specs = make_stimdur_specs(STIM_DURS, stim_dur_col=STIMDUR_COL)
 
-# Colors for stimdur lines (like view_colors in GroupComparison)
-stimdur_colors = {s.name: f"C{i}" for i, s in enumerate(stimdur_specs)}
+# Colors for stimdur lines (different from view_colors in GroupComparison)
+PALETTE = ["#0072B2", "#009E73", "#D55E00", "#CC79A7"]  # blue, green, vermillion, purple
+
+stimdur_colors = {s.name: PALETTE[i % len(PALETTE)] for i, s in enumerate(stimdur_specs)}
+
 
 
 # ----------------- configs -----------------
@@ -132,3 +154,32 @@ out = run_stimdur_comparison(
 plt.show()
 
 # %%
+
+view_colors = {
+    "wt":  "C0",
+    "het": "C1",
+    "hom": "C2",
+}
+
+stimdur_pretty = {
+    "15": "SD = 15 ms",
+    "60": "SD = 60 ms",
+    "120": "SD = 120 ms",
+    "6000": "SD = RT",
+}
+
+figs_by_stimdur = {}
+for s in stimdur_specs:
+    figs_by_stimdur[s.name] = plot_genotypes_4x3_for_stimdur(
+        prepared=out["prepared"],
+        group_jnd=out["group_jnd"],
+        views=views,
+        stimdur_name=s.name,
+        view_colors=view_colors,
+        cfg=cfg,
+        style=style,
+        stimdur_pretty=stimdur_pretty,
+        view_pretty={"wt": "WT", "het": "HET", "hom": "HOM"},
+    )
+    plt.show()
+

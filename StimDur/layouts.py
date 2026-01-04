@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, List
+from typing import Dict, List, Optional 
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -76,5 +76,99 @@ def plot_stimdur_4x3_for_view(
         for nm in names
     ]
     fig.legend(handles, legend_labels, loc="upper right", fontsize=style.legend_fs)
+    fig.tight_layout(rect=[0, 0, 0.92, 1])
+    return fig
+
+
+
+# --- One figure per stim_dur, lines = genotypes (views), rows = ABL ---
+
+
+def plot_genotypes_4x3_for_stimdur(
+    prepared: Dict[str, Dict[str, dict]],                 # view_name -> stimdur_name -> tables
+    group_jnd: Dict[str, Dict[str, "pd.DataFrame"]],       # view_name -> stimdur_name -> df
+    views: List[ViewSpec],
+    stimdur_name: str,
+    view_colors: Optional[Dict[str, str]],
+    cfg: StimDurComparisonConfig,
+    style: PlotStyle,
+    stimdur_pretty: Optional[Dict[str, str]] = None,       # optional title mapping
+    view_pretty: Optional[Dict[str, str]] = None,          # optional legend mapping
+) -> plt.Figure:
+    """
+    Figure for ONE stim_dur:
+      - rows = ABL
+      - cols = RT / MT / Psychometric
+      - lines = views (e.g., genotypes: wt/het/hom)
+    Uses the same per-view/per-stimdur prepared tables you already compute.
+    """
+
+    if view_colors is None:
+        view_colors = {}
+
+    # ---- collect ABL rows across ALL views for this stimdur ----
+    abl_set = set()
+    for v in views:
+        tables = prepared.get(v.name, {}).get(stimdur_name, None)
+        if not tables:
+            continue
+        for key in ("rt_group", "mt_group", "psy_group"):
+            dfk = tables.get(key, None)
+            if isinstance(dfk, pd.DataFrame) and (not dfk.empty) and ("ABL" in dfk.columns):
+                abl_set |= set(dfk["ABL"].unique())
+
+    abl_rows = sorted(int(a) for a in abl_set)
+    if not abl_rows:
+        raise ValueError(f"No ABL rows found for stimdur='{stimdur_name}' (check filters / stim_dur values).")
+
+    # ---- figure scaffold ----
+    fig, axes = plt.subplots(len(abl_rows), 3, figsize=(18, 4.2 * len(abl_rows)), sharex="col")
+    if len(abl_rows) == 1:
+        axes = axes.reshape(1, 3)
+
+    stimdur_title = stimdur_name
+    if stimdur_pretty is not None:
+        stimdur_title = stimdur_pretty.get(stimdur_name, stimdur_name)
+
+    # ---- plot per ABL row ----
+    for r, abl in enumerate(abl_rows):
+        ax_rt, ax_mt, ax_psy = axes[r, 0], axes[r, 1], axes[r, 2]
+
+        for i, v in enumerate(views):
+            tables = prepared.get(v.name, {}).get(stimdur_name, None)
+            if not tables:
+                continue
+
+            color = view_colors.get(v.name, f"C{i % 10}")
+
+            plot_rt_on_ax(ax_rt, tables, abl=abl, color=color, cfg=cfg)
+            plot_mt_on_ax(ax_mt, tables, abl=abl, color=color, cfg=cfg)
+            plot_psy_on_ax(ax_psy, tables, abl=abl, color=color, cfg=cfg)
+
+        ax_rt.set_title(f"{stimdur_title} — ABL {abl} RT", fontsize=style.title_fs, pad=style.title_pad)
+        ax_mt.set_title(f"{stimdur_title} — ABL {abl} MT", fontsize=style.title_fs, pad=style.title_pad)
+        ax_psy.set_title(f"{stimdur_title} — ABL {abl} Psychometric", fontsize=style.title_fs, pad=style.title_pad)
+
+        ax_rt.set_xlim(*cfg.xlim_abs)
+        ax_mt.set_xlim(*cfg.xlim_sym)
+        ax_psy.set_xlim(*cfg.xlim_sym)
+
+        style_axes(ax_rt, style); style_axes(ax_mt, style); style_axes(ax_psy, style)
+        apply_50_tick_labels(ax_rt, cfg.xlim_abs)
+        apply_50_tick_labels(ax_mt, cfg.xlim_sym)
+        apply_50_tick_labels(ax_psy, cfg.xlim_sym)
+
+    # ---- legend: genotypes (views) ----
+    labels = []
+    handles = []
+    for i, v in enumerate(views):
+        col = view_colors.get(v.name, f"C{i % 10}")
+        lab = v.name
+        if view_pretty is not None:
+            lab = view_pretty.get(v.name, v.name)
+        labels.append(lab)
+        handles.append(plt.Line2D([], [], color=col, marker="o", linestyle="None"))
+
+    fig.legend(handles, labels, loc="upper right", fontsize=style.legend_fs)
     fig.tight_layout(rect=[0, 0, 0.92, 1])
     return fig

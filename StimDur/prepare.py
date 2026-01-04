@@ -18,6 +18,12 @@ def sem(x: np.ndarray) -> float:
         return np.nan
     return x.std(ddof=1) / np.sqrt(len(x))
 
+def std(x: np.ndarray) -> float:
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    if len(x) <= 1:
+        return np.nan
+    return x.std(ddof=1)
 
 def apply_filters(df: pd.DataFrame, fcfg: FilterConfig) -> pd.DataFrame:
     df = df.copy()
@@ -48,6 +54,32 @@ def prep_rt(df_in: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     df_s = df_in[df_in["success"] == 1].copy()
     df_s["abs_ILD"] = df_s["ILD"].abs()
 
+    # ---- INDIVIDUAL MODE: 1 animal -> error bars = STD across sessions ----
+    if "session" in df_s.columns and df_s["animal"].nunique() == 1:
+        # mean RT per session
+        per_sess = (
+            df_s.groupby(["animal", "session", "ABL", "abs_ILD"])["timed_rt"]
+            .mean()
+            .reset_index()
+            .rename(columns={"abs_ILD": "ILD", "timed_rt": "mean_rt"})
+        )
+
+        # (optional) per_subj: mean across sessions (kept for compatibility)
+        per_subj = (
+            per_sess.groupby(["animal", "ABL", "ILD"])["mean_rt"]
+            .mean()
+            .reset_index()
+        )
+
+        # group-style table BUT error column is STD across sessions
+        grp = (
+            per_sess.groupby(["ABL", "ILD"])["mean_rt"]
+            .agg(mean="mean", sem=std, n="count")
+            .reset_index()
+        )
+        return per_subj, grp
+
+    # ---- GROUP MODE (unchanged): error bars = SEM across animals ----
     per_subj = (
         df_s.groupby(["animal", "ABL", "abs_ILD"])["timed_rt"]
         .mean()
@@ -66,6 +98,29 @@ def prep_rt(df_in: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
 def prep_mt(df_in: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     df_s = df_in[df_in["success"] == 1].copy()
 
+    # ---- INDIVIDUAL MODE: 1 animal -> error bars = STD across sessions ----
+    if "session" in df_s.columns and df_s["animal"].nunique() == 1:
+        per_sess = (
+            df_s.groupby(["animal", "session", "ABL", "ILD"])["timed_mt"]
+            .mean()
+            .reset_index()
+            .rename(columns={"timed_mt": "mean_mt"})
+        )
+
+        per_subj = (
+            per_sess.groupby(["animal", "ABL", "ILD"])["mean_mt"]
+            .mean()
+            .reset_index()
+        )
+
+        grp = (
+            per_sess.groupby(["ABL", "ILD"])["mean_mt"]
+            .agg(mean="mean", sem=std, n="count")
+            .reset_index()
+        )
+        return per_subj, grp
+
+    # ---- GROUP MODE (unchanged): SEM across animals ----
     per_subj = (
         df_s.groupby(["animal", "ABL", "ILD"])["timed_mt"]
         .mean()
@@ -79,6 +134,7 @@ def prep_mt(df_in: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
         .reset_index()
     )
     return per_subj, grp
+
 
 
 def prep_psy(
@@ -98,6 +154,95 @@ def prep_psy(
     mean_fits: Dict[int, dict | None] = {}
     jnd_rows: List[dict] = []
 
+    # ------------------------------------------------------------
+    # INDIVIDUAL MODE: if only 1 animal, treat SESSIONS as repeats
+    # Error bars = STD across sessions (stored in the 'sem' column)
+    # ------------------------------------------------------------
+    if ("session" in df_in.columns) and (df_in["animal"].nunique() == 1):
+        subject = df_in["animal"].iloc[0]
+
+        all_pts_sess: List[dict] = []
+        jnd_rows_sess: List[dict] = []
+        indiv_curves: Dict[tuple, dict] = {}
+        mean_fits: Dict[int, dict | None] = {}
+
+        # 1 psychometric per session
+        for sess, df_sess in df_in.groupby("session", sort=False):
+            results = Psychometric.compute_psychometrics_by_ABL(df_sess, model="my_psycho")
+
+            # JND per session (optional but useful for later)
+            jnd_df = DataHelpers.compute_jnd_by_ABL(results, skip_ABL=skip_abl_for_jnd)
+            if jnd_df is not None and not jnd_df.empty:
+                for _, r in jnd_df.iterrows():
+                    jnd_rows_sess.append(
+                        {"subject": subject, "session": int(sess), "ABL": int(r["ABL"]), "JND": float(r["JND"])}
+                    )
+
+            # points per session
+            for abl, res in results.items():
+                abl_i = int(abl)
+                ILDs = np.asarray(res["ILDs"])
+                pleft = np.asarray(res["PropLeft"], dtype=float)
+                for ild, val in zip(ILDs, pleft):
+                    all_pts_sess.append(
+                        {"subject": subject, "session": int(sess), "ABL": abl_i, "ILD": float(ild), "PropLeft": float(val)}
+                    )
+
+        pts_sess = pd.DataFrame(all_pts_sess, columns=["subject", "session", "ABL", "ILD", "PropLeft"])
+        points = pts_sess[["subject", "ABL", "ILD", "PropLeft"]].copy()  # keep return schema unchanged
+        jnd_indiv = pd.DataFrame(jnd_rows_sess, columns=["subject", "session", "ABL", "JND"])
+
+        if points.empty:
+            psy_group = pd.DataFrame(columns=["ABL", "ILD", "mean", "sem", "n"])
+            return points, psy_group, indiv_curves, {}, jnd_indiv
+
+        # aggregate ACROSS SESSIONS
+        psy_group = (
+            pts_sess.groupby(["ABL", "ILD"])["PropLeft"]
+            .agg(mean="mean", sem=std, n="count")
+            .reset_index()
+        )
+
+        # optional: still fit a single curve using ALL trials (like before)
+        if do_individual_fits:
+            results_full = Psychometric.compute_psychometrics_by_ABL(df_in, model="my_psycho")
+            for abl, res in results_full.items():
+                abl_i = int(abl)
+                ILDs = np.asarray(res["ILDs"])
+                pleft = np.asarray(res["PropLeft"], dtype=float)
+                if len(ILDs) >= 4 and np.isfinite(pleft).all():
+                    n_trials = np.full_like(ILDs, 50)
+                    try:
+                        _, _, xx, yy = Psychometric.fit_and_plot_psychometric(
+                            ILDs, pleft, model="my_psycho", n_trials=n_trials, show_plot=False
+                        )
+                        indiv_curves[(subject, abl_i)] = {"xx": xx, "yy": yy}
+                    except Exception:
+                        pass
+
+        # mean fit per ABL (from the session-mean psychometric)
+        for abl in sorted(psy_group["ABL"].unique()):
+            sub = psy_group[psy_group["ABL"] == abl]
+            ILDs = sub["ILD"].values
+            y = sub["mean"].values
+            if len(ILDs) < 4 or not np.isfinite(y).all():
+                mean_fits[int(abl)] = None
+                continue
+            n_trials = np.full_like(ILDs, 50)
+            try:
+                _, _, xx, yy = Psychometric.fit_and_plot_psychometric(
+                    ILDs, y, model="my_psycho", n_trials=n_trials, show_plot=False
+                )
+                mean_fits[int(abl)] = {"xx": xx, "yy": yy}
+            except Exception:
+                mean_fits[int(abl)] = None
+
+        return points, psy_group, indiv_curves, mean_fits, jnd_indiv
+
+    # ------------------------------------------------------------
+    # GROUP MODE: 
+    # Error bars = SEM across animal (stored in the 'sem' column)
+    # ------------------------------------------------------------
     # loop subjects once
     for subject, df_subj in df_in.groupby("animal", sort=False):
         results = Psychometric.compute_psychometrics_by_ABL(df_subj, model="my_psycho")
