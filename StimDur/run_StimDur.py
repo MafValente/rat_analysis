@@ -13,6 +13,9 @@ import os, sys
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import pandas as pd
+import numpy as np
+
+COHORT_CSV = "merged_ASD0018.csv"   # resolved relative to DATA_DIR
 
 # --------------------------------------------------------------
 # Project root on path (same style as GroupComparison)
@@ -31,8 +34,12 @@ from StimDur.config import (
     make_stimdur_specs
 )
 from StimDur.runner import run_stimdur_comparison
-from StimDur.layouts import plot_genotypes_4x3_for_stimdur
+from StimDur.layouts import (plot_genotypes_4x3_for_stimdur,
+                            plot_absild_perf_across_stimdur_1x3_for_view, 
+                            plot_kreg_4x3_by_abl_for_view
+)
 
+from StimDur.prepare import apply_filters
 
 # ----------------- paths -----------------
 LINE = "CNTNAP2"
@@ -46,7 +53,7 @@ LINE_ROOTS = {
 DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[(LINE, COHORT)])
 os.chdir(DATA_DIR)
 
-COHORT_CSV = "merged_all_subjects.csv"   # resolved relative to DATA_DIR
+
 
 
 # ----------------- font/style -----------------
@@ -99,6 +106,12 @@ else:
 # IMPORTANT: update these to match what's in your session_type==2 data
 STIMDUR_COL = "stim_dur"
 STIM_DURS = [15, 60, 120, 6000]  
+stimdur_pretty = {
+    "15": "SD = 15 ms",
+    "60": "SD = 60 ms",
+    "120": "SD = 120 ms",
+    "6000": "SD = RT",
+}
 
 stimdur_specs = make_stimdur_specs(STIM_DURS, stim_dur_col=STIMDUR_COL)
 
@@ -137,6 +150,7 @@ out = run_stimdur_comparison(
     fcfg=fcfg,
     style=style,
     stimdur_colors=stimdur_colors,
+    stimdur_pretty=stimdur_pretty,
     show=True,
 )
 
@@ -154,18 +168,13 @@ out = run_stimdur_comparison(
 plt.show()
 
 # %%
-
+# ==============================================================
+# RUN (one 4x3 figure per SD)
+# ==============================================================
 view_colors = {
     "wt":  "C0",
     "het": "C1",
     "hom": "C2",
-}
-
-stimdur_pretty = {
-    "15": "SD = 15 ms",
-    "60": "SD = 60 ms",
-    "120": "SD = 120 ms",
-    "6000": "SD = RT",
 }
 
 figs_by_stimdur = {}
@@ -183,3 +192,41 @@ for s in stimdur_specs:
     )
     plt.show()
 
+
+# %%
+
+# ================================================================
+# GROUP (one 3X1 figure) performance for each ILD over the StimDurs
+# ================================================================
+
+
+for v in views:
+    fig = plot_absild_perf_across_stimdur_1x3_for_view(
+        prepared_for_view=out["prepared"][v.name]["df_view"],
+        stimdur_specs=stimdur_specs,
+        view_name=v.name,
+        cfg=cfg,
+        style=style,
+        stimdur_pretty=stimdur_pretty,
+        abls=[20, 40, 60],   # choose your 3 ABLs
+    )
+    plt.show()
+
+# %%
+
+
+for v in views:
+    fig = plot_kreg_4x3_by_abl_for_view(
+        df_view=out["df_by_view"][v.name],
+        view_name=v.name,
+        stimdur_specs=stimdur_specs,
+        stimdur_col=STIMDUR_COL,
+        stimdur_colors=stimdur_colors,
+        stimdur_pretty=stimdur_pretty,
+        abls=(20, 40, 60),
+        xlim=(0.0, 0.5),
+        debug=True,
+    )
+    plt.show()
+
+# %%

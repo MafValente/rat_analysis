@@ -8,7 +8,7 @@ import Helpers.DataHelpers as DataHelpers
 import matplotlib as mpl
 import pickle
 
-subject_file = "merged_ASD0022.csv"
+subject_file = "merged_ASD0021.csv"
 
 # ==============================================================
 # CONFIG: choose which line you're analyzing
@@ -132,6 +132,12 @@ df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
 df = df[df["trial_is_repeat"] == False].copy()
 
 df = df[df["training_level"]==16].copy()
+
+
+sess = pd.to_numeric(df["session_type"], errors="coerce")
+sd   = pd.to_numeric(df["stim_dur"], errors="coerce")
+
+df = df[(sess == 1) | (sd == 6000)].copy()
 
 # Prep session data
 df_last = df
