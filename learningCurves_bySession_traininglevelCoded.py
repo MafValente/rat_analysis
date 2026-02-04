@@ -19,8 +19,8 @@ NORMALIZED_POINTS = 100   # resolution for each session
 # ==============================================================
 # CONFIG: choose which line you're analyzing
 # ==============================================================
-LINE = "SHANK3"   # or "SHANK3"
-COHORT = "cohort1" # or "cohort1", etc
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort2" # or "cohort1", etc
 
 BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 
@@ -641,6 +641,9 @@ def plot_mean_and_individual_training_colored(df, session_results,
     axes[0].set_ylim(.5, 1)
     axes[1].set_ylim(.5, 1)
     axes[2].set_ylim(.5, 1)
+    axes[0].set_xlim(0, 20)
+    axes[1].set_xlim(0, 20)
+    axes[2].set_xlim(0, 20)
 
     
     # -------------------------------------------------------
@@ -1289,8 +1292,8 @@ META_CSV    = "sex_gen.csv"
 # ==============================================================
 # CONFIG: choose which line you're analyzing
 # ==============================================================
-LINE = "SHANK3"   # or "SHANK3"
-COHORT = "cohort1" # or "cohort1", etc
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort2" # or "cohort1", etc
 
 BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 
@@ -1394,7 +1397,7 @@ LEVEL_COL = "training_level"
 
 fig, ax = plt.subplots(figsize=(10, 6))
 
-genotype_colors = {"wt": "C0", "het": "C1", "hom": "C2"}
+genotype_colors = {"wt":  "tab:pink", "het": "tab:olive", "hom": "tab:gray"}
 
 order = ["wt", "het", "hom"]   # whatever order you want
 
@@ -1443,7 +1446,7 @@ levels = sorted(per_animal_level_time[LEVEL_COL].unique())
 
 # Genotype order and colors (controls legend order too)
 genotypes = ["wt", "het", "hom"]
-genotype_colors = {"wt": "C0", "het": "C1", "hom": "C2"}
+genotype_colors = {"wt":  "tab:gray", "het": "tab:olive", "hom": "tab:pink"}
 
 fig, ax = plt.subplots(figsize=(10, 6))
 

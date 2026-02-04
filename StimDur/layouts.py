@@ -61,10 +61,16 @@ def plot_stimdur_4x3_for_view(
         ax_mt.set_xlim(*cfg.xlim_sym)
         ax_psy.set_xlim(*cfg.xlim_sym)
 
-        if abl in (20, 40):
-            ax_rt.set_ylim(0, 0.75)
+        if abl ==60:
+            ax_rt.set_ylim(0, 0.3)
         else:
             ax_rt.set_ylim(auto=True)   # or just don't set anything
+                
+        if abl ==20:
+            ax_rt.set_ylim(0, 0.7)
+        else:
+            ax_rt.set_ylim(auto=True)   # or just don't set anything
+        
 
 
         style_axes(ax_rt, style); style_axes(ax_mt, style); style_axes(ax_psy, style)

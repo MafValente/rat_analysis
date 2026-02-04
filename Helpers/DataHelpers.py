@@ -8,6 +8,7 @@ import Psychometric
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import norm
+from collections.abc import Mapping
 
 
 """
@@ -1171,30 +1172,52 @@ def extract_rt_points(chrono_data, abl):
     order = np.argsort(x)
     return x[order], y[order], sem[order]
 
+_CANON_ABL_COLORS = {
+    20: "C0",
+    40: "C1",
+    50: "C2",
+    60: "C3",
+}
 
-def overlay_makefig1_rt(ax, abl, chrono_data, color="black", zorder=-1, y_scale=1.0):
-    """Overlay mean RT ± SEM from make_fig1 chronometric pickle."""
+def _resolve_color(color, abl, default="black", force_black=False):
+    if force_black:
+        return "black"
+    # If user passed a single string like "black" / "C3", honor it
+    if isinstance(color, str):
+        return color
+    # If dict and has this ABL, use it
+    if isinstance(color, Mapping) and abl in color:
+        return color[abl]
+    # Otherwise fall back to canonical
+    return _CANON_ABL_COLORS.get(abl, default)
+
+def overlay_makefig1_rt(ax, abl, chrono_data, color="black",
+                        zorder=-1, y_scale=1.0, force_black=False):
     out = extract_rt_points(chrono_data, abl)
     if out is None:
         return
 
     x, y, sem = out
-    y = y * y_scale
-    sem = sem * y_scale
+    y *= y_scale
+    sem *= y_scale
 
-    # Match legacy look: no caps (capsize=0) :contentReference[oaicite:1]{index=1}
+    marker_color = _resolve_color(color, abl, default="black", force_black=force_black)
+
     ax.errorbar(
         x, y, yerr=sem,
         fmt="o",
-        color=color,
+        linestyle="none",
+        color=marker_color,          # NOTE: no quotes here
+        markerfacecolor=marker_color,
+        markeredgecolor=marker_color,
+        ecolor=marker_color,
         markersize=8.5,
         linewidth=0,
         elinewidth=1.5,
         capsize=0,
-        zorder=zorder,
+        zorder=zorder + 0.2,
     )
-    ax.plot(x, y, color=color, linewidth=2.5, zorder=zorder)
-
+    ax.plot(x, y, color="black", linewidth=2.5, zorder=zorder)
 
 def overlay_makefig1_rt_individuals(
     ax,

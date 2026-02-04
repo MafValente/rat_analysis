@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
-COHORT_CSV = "merged_ASD0018.csv"   # resolved relative to DATA_DIR
+COHORT_CSV = "merged_ASD0021.csv"   # resolved relative to DATA_DIR
 
 # --------------------------------------------------------------
 # Project root on path (same style as GroupComparison)

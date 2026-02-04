@@ -34,7 +34,7 @@ views = [
     ViewSpec("het", lambda d: DataHelpers.restrict_subjects(d, "sex_gen.csv", genotypes="het", subject_col="animal", genotype_col="genotype", attach_meta=True)),
     ViewSpec("hom", lambda d: DataHelpers.restrict_subjects(d, "sex_gen.csv", genotypes="hom", subject_col="animal", genotype_col="genotype", attach_meta=True)),
 ]
-view_colors = {"wt": "C0", "het": "C1", "hom": "C2"}
+view_colors = {"wt":  "tab:gray", "het": "tab:olive", "hom": "tab:pink"}
 
 
 # ----------------- overlays (RT + psychometric) -----------------
@@ -48,7 +48,7 @@ with open("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/Old Data/I
 overlay = OverlaySpec(
     makefig1_data=makefig1_data,
     makefig1_chrono=makefig1_chrono,
-    overlay_color="black",
+    overlay_color="None",
 )
 
 # ----------------- old JND overlay for comparison fig -----------------

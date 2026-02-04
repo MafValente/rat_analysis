@@ -10,7 +10,7 @@
 ..######..####.##....##..######...########.########...
 """
 
-subject_file = "merged_ASD0021.csv"
+subject_file = "merged_ASD0007.csv"
 
 # ===============================================================
 #   IMPORTS
@@ -50,6 +50,10 @@ df = df[df["training_level"] ==16]
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
 
 df = df[df["trial_is_repeat"]==False].copy()
+
+sess = pd.to_numeric(df["session_type"], errors="coerce")
+sd   = pd.to_numeric(df["stim_dur"], errors="coerce")
+df = df[(sess == 1) | (sd == 6000)].copy()
 
 df_valid = df[df["abort_type"]!="CNP"].copy()
 
@@ -535,9 +539,21 @@ if __name__ == "__main__":
 
 
     # preprocessing
+
     df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
-    df = df[df["training_level"] == 16].copy()
-    df = df[df["abort_type"]!="CNP"].copy()
+
+    df = df[df["trial_is_repeat"]==False].copy()
+
+    sess = pd.to_numeric(df["session_type"], errors="coerce")
+    sd   = pd.to_numeric(df["stim_dur"], errors="coerce")
+    df = df[(sess == 1) | (sd == 6000)].copy()
+
+    df_valid = df[df["abort_type"]!="CNP"].copy()
+
+    mask_aborts = (
+        (df["abort_type"] == "Fixation")
+    )
+    df_aborts = df[mask_aborts].copy()
 
     # which timing columns to analyze
     timing_columns = [

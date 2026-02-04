@@ -15,6 +15,7 @@ from .prepare import (
 )
 from .layouts import plot_views_3x3, plot_abls_4x3
 from .plots import plot_jnd_comparison_per_view
+from Helpers.DataHelpers import prepare_data
 
 
 def run_groupcomparison(
@@ -34,6 +35,18 @@ def run_groupcomparison(
     - layout="abls_4x3": returns main 4x3 fig with JND inset inside psychometrics (group mean±SEM), no separate JND fig
     """
     df = pd.read_csv(cohort_csv)
+
+    df = prepare_data(df, session_col="session", trial_col="trial")
+    df = df[df["trial_is_repeat"] == False].copy()
+
+    df = df[df["training_level"]==16].copy()
+
+
+    sess = pd.to_numeric(df["session_type"], errors="coerce")
+    sd   = pd.to_numeric(df["stim_dur"], errors="coerce")
+
+    df = df[(sess == 1) | (sd == 6000)].copy()
+
     df = apply_filters(df, fcfg)
 
     prepared = build_prepared(df, views, cfg)

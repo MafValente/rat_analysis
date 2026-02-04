@@ -1,0 +1,20 @@
+name: datasci
+channels:
+  - conda-forge
+dependencies:
+  - seaborn
+  - pandas
+  - numpy
+  - scipy
+  - matplotlib
+  - ipykernel
+  - statsmodels
+  - r-essentials
+  - r-base
+  - r-lme4
+  - r-lmertest
+  - polars
+  - rpy2
+  - bambi
+  - ipywidgets
+prefix: /Users/mafaldavalente/miniforge3/envs/datasci

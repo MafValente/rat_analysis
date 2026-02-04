@@ -125,11 +125,12 @@ def plot_abls_4x3(
 
         # overlays
         if overlay.makefig1_chrono is not None:
-            DataHelpers.overlay_makefig1_rt(ax_rt, abl, overlay.makefig1_chrono, color=overlay.overlay_color, zorder=-1)
+            DataHelpers.overlay_makefig1_rt(ax_rt, abl, overlay.makefig1_chrono, color=overlay.overlay_color,force_black=True, zorder=-1)
+
         if overlay.makefig1_data is not None and abl != 50:
             DataHelpers.overlay_makefig1_psychometrics(
                 ax_psy, overlay.makefig1_data, abl=abl,
-                color=overlay.overlay_color, show_individuals=False, use_abl_colors=False
+                color="black", show_individuals=False, use_abl_colors=False
             )
 
         style_axes(ax_rt, style, f"ABL {abl} — RT", "ILD (dB)", "Mean RT (s)")

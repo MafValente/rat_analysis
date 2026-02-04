@@ -42,6 +42,8 @@ class GroupComparisonConfig:
     skip_psy_fits: Tuple[int, ...] = (50,)
     xlim_sym: Tuple[float, float] = (-18.5, 18.5)
     xlim_abs: Tuple[float, float] = (0, 19)
+    ylim_rt: Tuple[float, float] = (0, 0.35)
+    ylim_mt: Tuple[float, float] = (0, 0.55)
     ild_shift_for_abl50: bool = True
 
 
