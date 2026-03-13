@@ -245,6 +245,21 @@ def _absild_summary_from_points(points: pd.DataFrame) -> pd.DataFrame:
     )
     return out
 
+
+def _get_or_build_absild_summary(tables: dict) -> pd.DataFrame:
+    """
+    Reuse cached abs(ILD) summary if available; otherwise build once from psy_points and cache it.
+    """
+    cached = tables.get("psy_absild_summary", None)
+    if isinstance(cached, pd.DataFrame):
+        return cached
+
+    points = tables.get("psy_points", None)
+    summary = _absild_summary_from_points(points)
+    tables["psy_absild_summary"] = summary
+    return summary
+
+
 def plot_absild_perf_across_stimdur_1x3_for_view(
     prepared_for_view: Dict[str, dict],   # stimdur_name -> tables
     stimdur_specs: List[StimDurSpec],
@@ -268,8 +283,7 @@ def plot_absild_perf_across_stimdur_1x3_for_view(
     sum_by_sd: Dict[str, pd.DataFrame] = {}
     all_abls = set()
     for nm in stim_names:
-        pts = prepared_for_view[nm]["psy_points"]  # has subject, ABL, ILD, PropLeft :contentReference[oaicite:5]{index=5}
-        summ = _absild_summary_from_points(pts)
+        summ = _get_or_build_absild_summary(prepared_for_view[nm])
         sum_by_sd[nm] = summ
         if not summ.empty:
             all_abls |= set(summ["ABL"].astype(int).unique())
@@ -284,7 +298,13 @@ def plot_absild_perf_across_stimdur_1x3_for_view(
     else:
         abls = [int(a) for a in abls]
 
-    fig, axes = plt.subplots(1, 3, figsize=(21, 6), sharey=True)
+    # Wider canvas so each panel gets more x-axis space for tick labels.
+    fig, axes = plt.subplots(1, 3, figsize=(39, 8), sharey=True)
+    fig.subplots_adjust(
+    left=0.06, right=0.99,   # tighter outer margins
+    bottom=0.22, top=0.88,   # room for rotated ticks + titles
+    wspace=0.12              # keep space between larger panels
+)
     for ax, abl in zip(axes, abls):
         # union of abs_ILDs across stimdur for this ABL
         absilds = set()
@@ -317,7 +337,118 @@ def plot_absild_perf_across_stimdur_1x3_for_view(
 
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper right", fontsize=style.legend_fs)
-    fig.tight_layout(rect=[0, 0, 0.9, 1])
+    fig.tight_layout(rect=[0, 0, 1, 1], w_pad=1.5)
+    return fig
+
+
+def plot_absild_perf_3x5_all_genotypes(
+    prepared: Dict[str, Dict[str, dict]],   # view_name -> stimdur_name -> tables
+    views: List[ViewSpec],
+    stimdur_specs: List[StimDurSpec],
+    abls: Sequence[int],
+    style: PlotStyle,
+    stimdur_pretty: Optional[Dict[str, str]] = None,
+    view_colors: Optional[Dict[str, str]] = None,
+    view_pretty: Optional[Dict[str, str]] = None,
+    absilds: Optional[Sequence[float]] = None,  # picks first 5 across selected ABLs if None
+) -> plt.Figure:
+    """
+    3x5-style figure (len(abls) rows x 5 columns):
+    rows are ABLs, columns are abs(ILD). Each panel has one line per genotype/view.
+    """
+    pretty = stimdur_pretty or {}
+    view_colors = view_colors or {}
+    view_pretty = view_pretty or {}
+    abls = [int(a) for a in abls]
+
+    stim_names = [s.name for s in stimdur_specs]
+    x = np.arange(len(stim_names))
+    xticklabels = [pretty.get(nm, str(nm)) for nm in stim_names]
+
+    # Precompute summary tables for each view and stimdur once.
+    sum_by_view_sd: Dict[str, Dict[str, pd.DataFrame]] = {}
+    all_absilds = set()
+    for v in views:
+        per_sd: Dict[str, pd.DataFrame] = {}
+        for nm in stim_names:
+            summ = _get_or_build_absild_summary(prepared[v.name][nm])
+            per_sd[nm] = summ
+            if not summ.empty:
+                sub = summ[summ["ABL"].astype(int).isin(abls)]
+                all_absilds |= set(sub["abs_ILD"].astype(float).unique())
+        sum_by_view_sd[v.name] = per_sd
+
+    all_absilds = sorted(float(v) for v in all_absilds if np.isfinite(v))
+    if absilds is None:
+        if len(all_absilds) < 5:
+            raise ValueError(
+                f"Need at least 5 |ILD| values across ABLs {abls}, found {all_absilds}. "
+                "Pass absilds=[...] explicitly."
+            )
+        absilds = all_absilds[:5]
+    else:
+        absilds = [float(v) for v in absilds]
+        if len(absilds) != 5:
+            raise ValueError(f"absilds must contain exactly 5 values, got {len(absilds)}.")
+
+    n_rows = len(abls)
+    n_cols = 5
+    # Width model in inches:
+    # fig width = fixed margins + (n_cols * panel width) + fixed gaps
+    # so changing panel_w_in scales only panel width, not inter-panel distance.
+    panel_w_in = 5.5
+    gap_w_in = 3
+    left_in, right_in = 0.6, 1.1
+    fig_w_in = left_in + (n_cols * panel_w_in) + ((n_cols - 1) * gap_w_in) + right_in
+    fig_h_in = 4.2 * n_rows
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w_in, fig_h_in), sharex=True, sharey=True)
+    axes = np.atleast_2d(axes)
+    wspace = gap_w_in / panel_w_in
+    fig.subplots_adjust(
+        left=left_in / fig_w_in,
+        right=1.0 - (right_in / fig_w_in),
+        bottom=0.06,
+        top=0.88,
+        wspace=wspace,
+        hspace=0.35,
+    )
+
+    for r, abl in enumerate(abls):
+        for c, absild in enumerate(absilds):
+            ax = axes[r, c]
+            for i, v in enumerate(views):
+                y = np.full(len(stim_names), np.nan)
+                yerr = np.full(len(stim_names), np.nan)
+
+                for j, nm in enumerate(stim_names):
+                    df = sum_by_view_sd[v.name][nm]
+                    row = df[
+                        (df["ABL"].astype(int) == int(abl))
+                        & (df["abs_ILD"].astype(float) == float(absild))
+                    ]
+                    if row.empty:
+                        continue
+                    y[j] = float(row["mean"].iloc[0])
+                    yerr[j] = float(row["sem"].iloc[0])
+
+                color = view_colors.get(v.name, f"C{i % 10}")
+                label = view_pretty.get(v.name, v.name)
+                ax.errorbar(x, y, yerr=yerr, marker="o", linewidth=2, capsize=3, color=color, label=label)
+
+            ax.set_title(f"ABL {abl} | |ILD| {absild:g}", fontsize=style.title_fs, pad=style.title_pad)
+            ax.set_xticks(x)
+            if r == n_rows - 1:
+                ax.set_xticklabels(xticklabels, rotation=30, ha="right", fontsize=style.tick_fs)
+            else:
+                ax.tick_params(labelbottom=False)
+            ax.set_ylim(0, 1)
+            if c == 0:
+                ax.set_ylabel("P(correct)", fontsize=style.label_fs)
+            style_axes(ax, style, square=False)
+
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper right", fontsize=style.legend_fs)
+    fig.suptitle("Performance by |ILD| across StimDur (all ABLs)", fontsize=style.title_fs + 2, y=0.98)
     return fig
 
 

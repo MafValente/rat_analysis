@@ -123,6 +123,114 @@ def add_stim_dur(df, sound_col="sound_index", session_col="session_type",
     df["stim_dur_label"] = np.where(df[out_col] == RT_MS, "RT", df[out_col].astype(str) + "ms")
     return df
 
+"""
+..######..##.....##..#######..########..########....########..##.....##.########.....###....########.####..#######..##....##..######.
+.##....##.##.....##.##.....##.##.....##....##.......##.....##.##.....##.##.....##...##.##......##.....##..##.....##.###...##.##....##
+.##.......##.....##.##.....##.##.....##....##.......##.....##.##.....##.##.....##..##...##.....##.....##..##.....##.####..##.##......
+..######..#########.##.....##.########.....##.......##.....##.##.....##.########..##.....##....##.....##..##.....##.##.##.##..######.
+.......##.##.....##.##.....##.##...##......##.......##.....##.##.....##.##...##...#########....##.....##..##.....##.##..####.......##
+.##....##.##.....##.##.....##.##....##.....##.......##.....##.##.....##.##....##..##.....##....##.....##..##.....##.##...###.##....##
+..######..##.....##..#######..##.....##....##.......########...#######..##.....##.##.....##....##....####..#######..##....##..######.
+"""
+
+
+
+def _empty_to_na(s: pd.Series) -> pd.Series:
+    """Treat '', ' ', 'nan', 'none' as missing."""
+    if s is None:
+        return s
+    out = s.copy()
+    # strings that should be NA
+    out = out.replace(r"^\s*$", pd.NA, regex=True)
+    out = out.replace({"nan": pd.NA, "NaN": pd.NA, "None": pd.NA, "none": pd.NA})
+    return out
+
+def _extract_first_number_as_numeric(s: pd.Series) -> pd.Series:
+    """Extract first numeric token from strings; return Float64 series."""
+    # If already numeric, keep it; if string, extract digits
+    as_num = pd.to_numeric(s, errors="coerce")
+    if as_num.notna().any():
+        # still also try extracting for the non-numeric rows
+        pass
+    extracted = s.astype("string").str.extract(r"(\d+(?:\.\d+)?)", expand=False)
+    extracted_num = pd.to_numeric(extracted, errors="coerce")
+    return as_num.fillna(extracted_num).astype("Float64")
+
+def normalize_short_sound_fields(
+    df: pd.DataFrame,
+    session_col: str = "session_type",
+    stimdur_col: str = "stim_dur",
+    shortdur_col: str = "short_duration",
+    isshort_col: str = "is_short_sound",
+    long_value: float = 6000,
+) -> pd.DataFrame:
+    """
+    1) Ensure `is_short_sound` exists for all sessions:
+       - If missing/empty: False/0.0 for session_type==1
+       - If missing/empty: False/0.0 for session_type==2 AND stim_dur==6000
+       - Otherwise (session_type==2 AND stim_dur!=6000): True/1.0
+
+    2) Harmonize `short_duration`:
+       - If short_duration empty:
+            * 0 if stim_dur == 6000
+            * else numeric portion of stim_dur (string -> extracted number; numeric -> itself)
+       - Result stored as numeric (Float64) in `short_duration`.
+    """
+    df = df.copy()
+
+    # --- session_type numeric (tolerant) ---
+    if session_col not in df.columns:
+        raise KeyError(f"Missing required column: {session_col}")
+    sess = pd.to_numeric(df[session_col], errors="coerce")
+
+    # --- stim_dur numeric (tolerant: numeric or string with number) ---
+    if stimdur_col not in df.columns:
+        df[stimdur_col] = pd.NA
+    stim_raw = _empty_to_na(df[stimdur_col])
+    stim_num = _extract_first_number_as_numeric(stim_raw)
+
+    # --- short_duration numeric ---
+    if shortdur_col not in df.columns:
+        df[shortdur_col] = pd.NA
+    sd_raw = _empty_to_na(df[shortdur_col])
+    sd_num = _extract_first_number_as_numeric(sd_raw)
+
+    sd_missing = sd_num.isna()
+    # fill empty short_duration using stim_dur rule
+    is_long = stim_num.eq(long_value)
+    sd_num = sd_num.copy()
+    sd_num.loc[sd_missing & is_long] = 0
+    # "numerical portion of the string otherwise" -> use stim_num
+    sd_num.loc[sd_missing & (~is_long)] = stim_num.loc[sd_missing & (~is_long)]
+    df[shortdur_col] = sd_num.astype("Float64")
+
+    # --- is_short_sound ---
+    if isshort_col not in df.columns:
+        df[isshort_col] = pd.NA
+
+    iss_raw = _empty_to_na(df[isshort_col])
+
+    # Coerce various encodings to numeric if present
+    iss_norm = iss_raw.astype("string").str.strip()
+    iss_norm = iss_norm.replace({
+        "TRUE": "1", "True": "1", "true": "1",
+        "FALSE": "0", "False": "0", "false": "0",
+    })
+    iss_num = pd.to_numeric(iss_norm, errors="coerce").astype("Float64")
+
+    iss_missing = iss_num.isna()
+
+    # Infer for missing values:
+    # session_type 1 => False
+    # session_type 2 => True iff stim_dur != 6000 (i.e., short)
+    inferred = ((sess.eq(2)) & (~stim_num.eq(long_value))).astype("Float64")
+
+    # Your explicit conditions are a subset of this inference, but this also fills the "otherwise" case.
+    iss_num.loc[iss_missing] = inferred.loc[iss_missing]
+
+    df[isshort_col] = iss_num.astype("Float64")
+
+    return df
 
 """
 ..######..####..######...##.....##..#######..####.########.
@@ -1212,10 +1320,10 @@ def overlay_makefig1_rt(ax, abl, chrono_data, color="black",
         markeredgecolor=marker_color,
         ecolor=marker_color,
         markersize=8.5,
-        linewidth=0,
+        linewidth=3,
         elinewidth=1.5,
         capsize=0,
-        zorder=zorder + 0.2,
+        zorder=zorder,
     )
     ax.plot(x, y, color="black", linewidth=2.5, zorder=zorder)
 

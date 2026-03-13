@@ -53,7 +53,7 @@ def plot_views_3x3(
             if overlay.makefig1_data is not None and abl != 50:
                 DataHelpers.overlay_makefig1_psychometrics(
                     ax_psy, overlay.makefig1_data, abl=abl,
-                    color=overlay.overlay_color, show_individuals=False, use_abl_colors=False
+                    color="black", show_individuals=False, use_abl_colors=False
                 )
 
         style_axes(ax_rt, style, f"{vn} — RT", "ILD (dB)", "Mean RT (s)")

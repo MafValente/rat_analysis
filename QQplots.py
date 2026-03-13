@@ -30,8 +30,7 @@ cohort_file = "merged_all_subjects.csv"
 error_mode = "individuals"  # "sem" or "individuals"
 MASK_59_TO_60 = True
 MASK_25_TO_50_WHEN_TL16 = True
-TRAINING_MIN = 16
-SESSION_MIN = 13
+
 
 TITLE_FONTSIZE = 20
 LABEL_FONTSIZE = 20
@@ -54,11 +53,12 @@ plt.rcParams["font.sans-serif"] = [
 # ==============================================================
 df = pd.read_csv(cohort_file)
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
-df = df[df["trial_is_repeat"]==False].copy()
-if "training_level" in df.columns:
-    df = df[df["training_level"] >= TRAINING_MIN]
-if "session" in df.columns:
-    df = df[df["session"] >= SESSION_MIN]
+df = df[df["trial_is_repeat"] == False].copy()
+df = df[df["training_level"] == 16].copy()
+
+sess = pd.to_numeric(df["session_type"], errors="coerce")
+sd   = pd.to_numeric(df["stim_dur"], errors="coerce")
+df = df[(sess == 1) | (sd == 6000)].copy()
 
 df = df[df["training_level"]==16].copy()
 df = df[df["session"]>13].copy()

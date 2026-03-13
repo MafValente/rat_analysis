@@ -372,8 +372,8 @@ d8P' ?88  d8P' ?88  d8P' ?88    88P'  `d8b_,dPd8P' ?88  d8P' ?88    88P   d8b_,d
 # ==============================================================
 # CONFIG: choose which line you're analyzing
 # ==============================================================
-LINE = "CNTNAP2"   # or "SHANK3"
-COHORT = "cohort2" # or "cohort1", etc
+LINE = "SHANK3"   # or "SHANK3"
+COHORT = "cohort1" # or "cohort1", etc
 
 BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 

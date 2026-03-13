@@ -767,6 +767,3 @@ def plot_rt_by_abl_panels(results, bins, subject_id):
 
 # ----- third plot: panels = ABL, curves = genotypes -----
 plot_rt_by_abl_panels(results_rt, bins_rt, subject_id="All Animals")
-
-
-# %%

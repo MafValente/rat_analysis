@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
-COHORT_CSV = "merged_ASD0021.csv"   # resolved relative to DATA_DIR
+COHORT_CSV = "merged_all_subjects.csv"   # resolved relative to DATA_DIR
 
 # --------------------------------------------------------------
 # Project root on path (same style as GroupComparison)
@@ -35,7 +35,8 @@ from StimDur.config import (
 )
 from StimDur.runner import run_stimdur_comparison
 from StimDur.layouts import (plot_genotypes_4x3_for_stimdur,
-                            plot_absild_perf_across_stimdur_1x3_for_view, 
+                            plot_absild_perf_across_stimdur_1x3_for_view,
+                            plot_absild_perf_3x5_all_genotypes,
                             plot_kreg_4x3_by_abl_for_view
 )
 
@@ -104,19 +105,25 @@ else:
 
 # ----------------- stim_dur traces -----------------
 # IMPORTANT: update these to match what's in your session_type==2 data
-STIMDUR_COL = "stim_dur"
-STIM_DURS = [15, 60, 120, 6000]  
+STIMDUR_COL = "short_duration"
+STIM_DURS = [8, 15, 16, 32, 60, 64, 120, 00]  
 stimdur_pretty = {
+    "8": "SD = 8 ms",
     "15": "SD = 15 ms",
+    "16": "SD = 16 ms",
+    "32": "SD = 32 ms",
     "60": "SD = 60 ms",
+    "64": "SD = 64 ms",
     "120": "SD = 120 ms",
-    "6000": "SD = RT",
+    "0": "SD = RT",
 }
 
 stimdur_specs = make_stimdur_specs(STIM_DURS, stim_dur_col=STIMDUR_COL)
 
 # Colors for stimdur lines (different from view_colors in GroupComparison)
-PALETTE = ["#0072B2", "#009E73", "#D55E00", "#CC79A7"]  # blue, green, vermillion, purple
+PALETTE = ["#B2A706","#0072B2", "#56B4E9", "#E69F00", "#009E73", "#D55E00", "#CC79A7",
+           "#4D4D4D"]  
+
 
 stimdur_colors = {s.name: PALETTE[i % len(PALETTE)] for i, s in enumerate(stimdur_specs)}
 
@@ -172,9 +179,9 @@ plt.show()
 # RUN (one 4x3 figure per SD)
 # ==============================================================
 view_colors = {
-    "wt":  "C0",
-    "het": "C1",
-    "hom": "C2",
+    "wt":  "tab:gray",
+    "het": "tab:green",
+    "hom": "tab:pink",
 }
 
 figs_by_stimdur = {}
@@ -202,7 +209,7 @@ for s in stimdur_specs:
 
 for v in views:
     fig = plot_absild_perf_across_stimdur_1x3_for_view(
-        prepared_for_view=out["prepared"][v.name]["df_view"],
+        prepared_for_view=out["prepared"][v.name],
         stimdur_specs=stimdur_specs,
         view_name=v.name,
         cfg=cfg,
@@ -228,5 +235,23 @@ for v in views:
         debug=True,
     )
     plt.show()
+
+# %%
+# ================================================================
+# GROUP (3x5): rows are ABLs, columns are |ILD|, lines are genotypes
+# ================================================================
+
+fig = plot_absild_perf_3x5_all_genotypes(
+    prepared=out["prepared"],
+    views=views,
+    stimdur_specs=stimdur_specs,
+    abls=[20, 40, 60],
+    style=style,
+    stimdur_pretty=stimdur_pretty,
+    view_colors={"wt": "tab:gray", "het": "tab:green", "hom": "tab:pink"},
+    view_pretty={"wt": "WT", "het": "HET", "hom": "HOM"},
+    absilds=[1, 2, 4, 8, 16],
+)
+plt.show()
 
 # %%

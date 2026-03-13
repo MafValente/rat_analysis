@@ -18,7 +18,7 @@ import argparse
 
 
 # ==========================================================
-# CONFIG: where are the data folders for each line/cohort?
+# CONFIG: where are the data folders for each line/cohort
 # ==========================================================
 BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 
@@ -129,6 +129,21 @@ def merge_session_files(input_rat, line="CNTNAP2", cohort="cohort2"):
                 out_col="stim_dur",
                 type1_value=6000,  # or pd.NA
             )
+
+            # ✅ NEW: normalize is_short_sound + short_duration across old/new sessions
+            df = DataHelpers.normalize_short_sound_fields(
+                df,
+                session_col="session_type",
+                stimdur_col="stim_dur",
+                shortdur_col="short_duration",
+                isshort_col="is_short_sound",
+                long_value=6000,
+            )
+
+            print("after normalize:",
+            df["is_short_sound"].isna().mean(),
+            df["short_duration"].isna().mean(),
+                "unique session_type:", df["session_type"].dropna().astype(str).unique()[:5])
 
             df["__source_file"] = file
             df["__session_sort_key"] = DataHelpers._infer_file_date(filepath)  # <-- now from name out_YYMMDD
