@@ -8,18 +8,19 @@ import Helpers.DataHelpers as DataHelpers
 import matplotlib as mpl
 import pickle
 
-subject_file = "merged_ASD0022.csv"
+subject_file = "merged_ASD0049.csv"
 
 # ==============================================================
 # CONFIG: choose which line you're analyzing
 # ==============================================================
-LINE = "CNTNAP2"   # or "SHANK3"
-COHORT = "cohort2" # or "cohort1", etc
+LINE = "SHANK3"   # or "SHANK3"
+COHORT = "cohort1" # or "cohort1", etc
 
 BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 
 LINE_ROOTS = {
      ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
      ("SHANK3", "cohort1"): "SHANK3_cohort1",
  }
 
@@ -136,8 +137,9 @@ df = df[df["training_level"]==16].copy()
 
 sess = pd.to_numeric(df["session_type"], errors="coerce")
 sd   = pd.to_numeric(df["stim_dur"], errors="coerce")
+short_duration   = pd.to_numeric(df["short_duration"], errors="coerce")
 
-df = df[(sess == 1) | (sd == 6000)].copy()
+df = df[(sess == 1) | (sd == 6000) | (short_duration == 0)].copy()
 
 # Prep session data
 df_last = df

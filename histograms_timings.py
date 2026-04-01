@@ -10,7 +10,7 @@
 ..######..####.##....##..######...########.########...
 """
 
-subject_file = "merged_ASD0007.csv"
+subject_file = "merged_ASD0049.csv"
 
 # ===============================================================
 #   IMPORTS
@@ -25,13 +25,14 @@ import numpy as np
 # ==============================================================
 # CONFIG: choose which line you're analyzing
 # ==============================================================
-LINE = "CNTNAP2"   # or "SHANK3"
-COHORT = "cohort2" # or "cohort1", etc
+LINE = "SHANK3"   # or "SHANK3"
+COHORT = "cohort1" # or "cohort1", etc
 
 BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 
 LINE_ROOTS = {
      ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
      ("SHANK3", "cohort1"): "SHANK3_cohort1",
  }
 
@@ -50,6 +51,7 @@ df = df[df["training_level"] ==16]
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
 
 df = df[df["trial_is_repeat"]==False].copy()
+#df = df[df["session"]>13].copy()
 
 sess = pd.to_numeric(df["session_type"], errors="coerce")
 sd   = pd.to_numeric(df["stim_dur"], errors="coerce")
@@ -252,6 +254,7 @@ plt.show()
 # --- Prepare dataframe ---
 df_rt = df_valid.dropna(subset=["timed_rt", "ABL"]).copy()
 df_rt = df_rt[df_rt["ABL"] != 50]   # exclude ABL = 50
+
 
 # --- Set fixed bin width ---
 bin_width = 0.01   # <-- CHANGE THIS to whatever bin size you need

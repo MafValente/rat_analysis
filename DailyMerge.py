@@ -23,7 +23,9 @@ import argparse
 BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 
 LINE_ROOTS = {
+    ("CNTNAP2", "cohort1"): "CNTNAP2_cohort1",
     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+    ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
     ("SHANK3",  "cohort1"): "SHANK3_cohort1",
     # add more as needed
 }
@@ -34,7 +36,46 @@ def get_base_dir(line="CNTNAP2", cohort="cohort2"):
     """
     return os.path.join(BASE_DATA_DIR, LINE_ROOTS[(line, cohort)])
 
-def merge_session_files(input_rat, line="CNTNAP2", cohort="cohort2"):
+
+def get_animals_for_cohort(line="CNTNAP2", cohort="cohort2", rat=None):
+    """
+    Return the animals for a given line + cohort.
+    If rat is provided, return only that rat after validating it exists.
+    Prefer sex_gen.csv when available; otherwise fall back to animal folders.
+    """
+    base_dir = get_base_dir(line, cohort)
+
+    if rat:
+        rat_dir = os.path.join(base_dir, rat)
+        if not os.path.isdir(rat_dir):
+            raise FileNotFoundError(f"Rat folder not found: {rat_dir}")
+        return [rat]
+
+    sex_gen_path = os.path.join(base_dir, "sex_gen.csv")
+    if os.path.exists(sex_gen_path):
+        try:
+            sex_gen_df = pd.read_csv(sex_gen_path, sep=";")
+            if "animal" in sex_gen_df.columns:
+                animals = (
+                    sex_gen_df["animal"]
+                    .dropna()
+                    .astype(str)
+                    .str.strip()
+                    .tolist()
+                )
+                animals = [animal for animal in animals if os.path.isdir(os.path.join(base_dir, animal))]
+                if animals:
+                    return animals
+        except Exception as e:
+            print(f"⚠️ Could not read {sex_gen_path}: {e}")
+
+    animals = [
+        entry for entry in sorted(os.listdir(base_dir))
+        if os.path.isdir(os.path.join(base_dir, entry)) and entry.startswith("ASD")
+    ]
+    return animals
+
+def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2"):
 
     """
     Merge all raw session CSVs for one subject into merged_<rat>.csv
@@ -140,11 +181,6 @@ def merge_session_files(input_rat, line="CNTNAP2", cohort="cohort2"):
                 long_value=6000,
             )
 
-            print("after normalize:",
-            df["is_short_sound"].isna().mean(),
-            df["short_duration"].isna().mean(),
-                "unique session_type:", df["session_type"].dropna().astype(str).unique()[:5])
-
             df["__source_file"] = file
             df["__session_sort_key"] = DataHelpers._infer_file_date(filepath)  # <-- now from name out_YYMMDD
             df["__session_mtime"] = os.path.getmtime(filepath)
@@ -184,6 +220,27 @@ def merge_session_files(input_rat, line="CNTNAP2", cohort="cohort2"):
     else:
         print("❌ No files were successfully merged.")
         return  # <-- ensure function exits if nothing merged
+
+
+def merge_session_files(line="CNTNAP2", cohort="cohort2", rat=None):
+    """
+    Merge raw session CSVs for either:
+    - one rat, if rat is provided
+    - all rats in the given line + cohort, if rat is omitted
+
+    Examples
+    --------
+    merge_session_files("SHANK3", "cohort1")
+    merge_session_files("CNTNAP2", "cohort2", rat="ASD0013")
+    """
+    animals = get_animals_for_cohort(line, cohort, rat=rat)
+    if not animals:
+        print(f"❌ No animals found for {line} {cohort}")
+        return
+
+    print(f"Processing {len(animals)} animal(s) for {line} {cohort}: {', '.join(animals)}")
+    for animal in animals:
+        _merge_single_rat_session_files(animal, line=line, cohort=cohort)
 """
    # --- NEW PART: merge into setup-level file ---
     # Split by setup and save per-subject per-setup merged files
@@ -224,10 +281,10 @@ import pandas as pd
 
 #merge_subject_files_with_model("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2", "merged_ASD0007.csv")
 
-model_file = "merged_ASD0007.csv"
+model_file = None
 
 def merge_subject_files_with_model(line="CNTNAP2", cohort="cohort2",
-                                   model_file="merged_ASD0007.csv",
+                                   model_file=None,
                                    output_file=None):
     """
     Merge all subject-level merged CSVs in a directory using a reference model file
@@ -252,8 +309,18 @@ def merge_subject_files_with_model(line="CNTNAP2", cohort="cohort2",
     base_dir = get_base_dir(line, cohort)
 
     # --- find the model file ---
-    model_path = model_file if os.path.isabs(model_file) else os.path.join(base_dir, model_file)
-    
+    if model_file is None:
+        available_merged_files = sorted(
+            f for f in os.listdir(base_dir)
+            if f.startswith("merged_AS") and f.endswith(".csv") and "setup" not in f
+        )
+        if not available_merged_files:
+            print("❌ No merged subject files found to use as model.")
+            return None
+        model_path = os.path.join(base_dir, available_merged_files[0])
+    else:
+        model_path = model_file if os.path.isabs(model_file) else os.path.join(base_dir, model_file)
+
     if not os.path.exists(model_path):
         print(f"❌ Model file not found: {model_path}")
         return None
@@ -320,7 +387,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--line",   choices=["CNTNAP2", "SHANK3"], default="CNTNAP2")
     parser.add_argument("--cohort", default="cohort2")
-    parser.add_argument("--rat",    help="Subject ID, e.g. ASD0007")
+    parser.add_argument("--rat", help="Optional subject ID, e.g. ASD0007. If omitted, process all rats in the cohort.")
     parser.add_argument(
         "--mode",
         choices=["session", "animals", "both"],
@@ -333,19 +400,17 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--model",
-        default="merged_ASD0007.csv",
-        help="Model file used for all-subject merge",
+        default=None,
+        help="Optional model file used for all-subject merge",
     )
     args = parser.parse_args()
-
-    # if you added get_base_dir earlier:
-    base_dir = get_base_dir(args.line, args.cohort)
+    animals = get_animals_for_cohort(args.line, args.cohort, rat=args.rat)
+    if not animals:
+        raise SystemExit(f"No animals found for {args.line} {args.cohort}")
 
     # --- run only what you asked for ---
     if args.mode in ("session", "both"):
-        if args.rat is None:
-            raise SystemExit("You must pass --rat ASD000X when mode is 'session' or 'both'")
-        merge_session_files(args.rat, base_dir=base_dir)
+        merge_session_files(args.line, args.cohort, rat=args.rat)
 
-    if args.mode in ("all", "both"):
-        merge_subject_files_with_model(base_dir=base_dir, model_file=args.model)
+    if args.mode in ("animals", "both"):
+        merge_subject_files_with_model(line=args.line, cohort=args.cohort, model_file=args.model)

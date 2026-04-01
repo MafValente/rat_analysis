@@ -60,7 +60,7 @@ sess = pd.to_numeric(df["session_type"], errors="coerce")
 sd   = pd.to_numeric(df["stim_dur"], errors="coerce")
 df = df[(sess == 1) | (sd == 6000)].copy()
 
-df = df[df["training_level"]==16].copy()
+
 df = df[df["session"]>13].copy()
 df = df[df["success"]==1].copy()
 # df = df[df["timed_rt"]>.05].copy()
@@ -108,6 +108,12 @@ views = [
 ILD_LISTS = [[1, 2], [4, 8]]   # like {[1,2],[4,8]} in MATLAB
 ABL_VALUES = [20, 40, 60]
 
+ABL_COLORS = {
+    20: "tab:blue",
+    40: "tab:orange",
+    60: "tab:red",
+}
+
 # For now no SD; keep structure ready (but it's optional)
 SD_VALUES = [None]  # later you can use real SDs
 
@@ -149,6 +155,8 @@ def plot_rt_quantiles_and_hists_for_view(df_view, view_name):
       - top row: quantile vs quantile curves (20 vs 60, 40 vs 60)
       - bottom row: RT histograms (20, 40, 60)
     """
+    from matplotlib.lines import Line2D
+
     # -----------------------------
     # Build outcell + quantiles
     # -----------------------------
@@ -211,7 +219,7 @@ def plot_rt_quantiles_and_hists_for_view(df_view, view_name):
     # -----------------------------
     # Top row: quantile vs quantile
     # -----------------------------
-    ymin, ymax = -0.2, 0.6
+    ymin, ymax = -0.2, 1
     for k1 in range(len(ILD_LISTS)):
         ax = axes[0, k1]
 
@@ -221,8 +229,8 @@ def plot_rt_quantiles_and_hists_for_view(df_view, view_name):
         y_q_20 = q_1[0][0][k1]
         y_q_40 = q_1[0][1][k1]
 
-        ax.plot(x_q, y_q_20)
-        ax.plot(x_q, y_q_40)
+        ax.plot(x_q, y_q_20, color=ABL_COLORS[20], linewidth=1.5, label="20")
+        ax.plot(x_q, y_q_40, color=ABL_COLORS[40], linewidth=1.5, label="40")
 
         # horizontal ref line: 0
         ax.plot(
@@ -230,6 +238,7 @@ def plot_rt_quantiles_and_hists_for_view(df_view, view_name):
             0 * np.array([-1, 1]),
             linestyle=":",
             color="k",
+            linewidth=1.0,
         )
 
         ax.set_xlim(-0.1, 0.5)
@@ -246,6 +255,19 @@ def plot_rt_quantiles_and_hists_for_view(df_view, view_name):
             ax.set_ylabel("RT difference (s)", fontsize=LABEL_FONTSIZE)
         else:
             ax.set_yticklabels([])
+
+    # Legend for top row (put it on the last top axis)
+    top_handles = [
+        Line2D([0], [0], color=ABL_COLORS[20], lw=1.5, label="20-60"),
+        Line2D([0], [0], color=ABL_COLORS[40], lw=1.5, label="40-60"),
+    ]
+    axes[0, -1].legend(
+        handles=top_handles,
+        loc="upper left",
+        fontsize=LEGEND_FONTSIZE,
+        frameon=False,
+        title=None,
+    )
 
     # -----------------------------
     # Bottom row: histograms
@@ -264,26 +286,33 @@ def plot_rt_quantiles_and_hists_for_view(df_view, view_name):
                 histtype="step",
                 density=True,
                 linewidth=0.85,
+                color=ABL_COLORS[abl_val],
             )
 
         ax.set_xlim(-0.1, 0.5)
-        ax.set_ylim(0, 8.5)
+        ax.set_ylim(0, 15)
 
         if k1 > 0:
             ax.set_yticklabels([])
 
         ax.set_xlabel("RT (s)", fontsize=LABEL_FONTSIZE)
 
-    # legend in last bottom panel
+    # Legend for bottom row (last bottom axis)
+    hist_handles = [
+        Line2D([0], [0], color=ABL_COLORS[a], lw=1.5, label=str(a))
+        for a in ABL_VALUES
+    ]
     axes[1, -1].legend(
-        [str(a) for a in ABL_VALUES],
+        handles=hist_handles,
         loc="upper right",
         fontsize=LEGEND_FONTSIZE,
+        frameon=False,
         title=None,
     )
 
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     return fig
+
 
 # ==============================================================
 # === RUN FOR ALL VIEWS ========================================

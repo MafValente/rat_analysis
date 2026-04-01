@@ -8,7 +8,7 @@ import Psychometric
 import Helpers.DataHelpers as DataHelpers
 from matplotlib.ticker import MaxNLocator
 
-subject_file = "merged_ASD0023.csv"
+subject_file = "merged_ASD0049.csv"
 
 """
 
@@ -41,6 +41,7 @@ BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 
 LINE_ROOTS = {
      ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
      ("SHANK3", "cohort1"): "SHANK3_cohort1",
  }
 
@@ -60,7 +61,7 @@ print(df["repeated_trial"].astype(str).str.strip().str.upper().value_counts(drop
 # --- Prep session(s) data
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
 
-df = df[df["training_level"]<16].copy()
+df = df[df["training_level"]==16].copy()
 
 df_valid = df[df["trial_is_repeat"]==False].copy()
 
@@ -73,7 +74,7 @@ meanRT_per_session = (
 )
 
 meanMT_per_session = (
-    df_valid[(df_valid["success"] == 1) & (df_valid["timed_mt"] <= 2)] 
+    df_valid[(df_valid["success"] == 1) & (df_valid["timed_mt"] <= .8)] 
     #.assign(timed_mt=lambda d: d["timed_mt"].clip(upper=1))  # cap MTs at 1s
     .groupby(["session", "ABL"])["timed_mt"]
     .agg(["mean", "std", "count"])
@@ -211,7 +212,7 @@ plt.show()
 
 #%%
 
-fig, axes = plt.subplots(3, 3, figsize=(18, 15))
+fig, axes = plt.subplots(3, 3, figsize=(28, 23))
 
 
 for i, abl in enumerate(sorted(meanRT_per_session["ABL"].unique())):

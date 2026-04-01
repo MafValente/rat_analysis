@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
-COHORT_CSV = "merged_all_subjects.csv"   # resolved relative to DATA_DIR
+COHORT_CSV = "merged_ASD0024.csv"   # resolved relative to DATA_DIR
 
 # --------------------------------------------------------------
 # Project root on path (same style as GroupComparison)
@@ -43,12 +43,13 @@ from StimDur.layouts import (plot_genotypes_4x3_for_stimdur,
 from StimDur.prepare import apply_filters
 
 # ----------------- paths -----------------
-LINE = "CNTNAP2"
-COHORT = "cohort2"
+LINE = "SHANK3"
+COHORT = "cohort1"
 
 BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 LINE_ROOTS = {
     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+    ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
     ("SHANK3", "cohort1"): "SHANK3_cohort1",
 }
 DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[(LINE, COHORT)])

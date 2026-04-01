@@ -19,13 +19,14 @@ NORMALIZED_POINTS = 100   # resolution for each session
 # ==============================================================
 # CONFIG: choose which line you're analyzing
 # ==============================================================
-LINE = "CNTNAP2"   # or "SHANK3"
-COHORT = "cohort2" # or "cohort1", etc
+LINE = "SHANK3"   # or "SHANK3"
+COHORT = "cohort1" # or "cohort1", etc
 
 BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 
 LINE_ROOTS = {
      ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
      ("SHANK3", "cohort1"): "SHANK3_cohort1",
  }
 
@@ -1293,12 +1294,13 @@ META_CSV    = "sex_gen.csv"
 # CONFIG: choose which line you're analyzing
 # ==============================================================
 LINE = "CNTNAP2"   # or "SHANK3"
-COHORT = "cohort2" # or "cohort1", etc
+COHORT = "cohort3" # or "cohort1", etc
 
 BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 
 LINE_ROOTS = {
      ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
      ("SHANK3", "cohort1"): "SHANK3_cohort1",
  }
 
@@ -1397,7 +1399,7 @@ LEVEL_COL = "training_level"
 
 fig, ax = plt.subplots(figsize=(10, 6))
 
-genotype_colors = {"wt":  "tab:pink", "het": "tab:olive", "hom": "tab:gray"}
+genotype_colors = {"wt":  "tab:gray", "het": "tab:olive", "hom": "tab:pink"}
 
 order = ["wt", "het", "hom"]   # whatever order you want
 

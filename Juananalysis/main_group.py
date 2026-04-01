@@ -11,6 +11,7 @@ from plot_results import shaded_curve
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 
 from kernel_regression import (
     kreg_for_aggregate,
@@ -30,8 +31,12 @@ META_CSV   = "sex_gen.csv"
 # -------------------------------
 df = load_behavior_csv(TRIALS_CSV)
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
-
 df = df[df["trial_is_repeat"] == False].copy()
+df = df[df["training_level"] == 16].copy()
+
+sess = pd.to_numeric(df["session_type"], errors="coerce")
+sd   = pd.to_numeric(df["stim_dur"], errors="coerce")
+df = df[(sess == 1) | (sd == 6000)].copy()
 
 df = DataHelpers.restrict_subjects(
     df,
@@ -87,6 +92,13 @@ print("✅ Finished group-level kernel regression. You can now run the plotting 
 # =====================================================
 # 5) Tachometric curves
 # =====================================================
+
+colors = {
+    "wt":  "tab:gray",
+    "het": "tab:green",
+    "hom": "tab:pink",
+}
+
 
 fig, ax = plt.subplots(figsize=(7, 4))
 
@@ -187,3 +199,5 @@ ax.set_title("RT CDF by genotype")
 ax.legend()
 plt.tight_layout()
 plt.show()
+
+# %%
