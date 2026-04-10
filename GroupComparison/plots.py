@@ -49,66 +49,111 @@ def apply_50_tick_labels(ax, xlim=(-19, 19)):
     ax.set_xticklabels([("-50" if x == -18 else "50" if x == 18 else str(int(x))) for x in xticks])
 
 
-def plot_rt_on_ax(ax, tables: dict, abl: int, color: str, cfg: GroupComparisonConfig):
+def plot_rt_on_ax(
+    ax,
+    tables: dict,
+    abl: int,
+    color: str,
+    cfg: GroupComparisonConfig,
+    *,
+    linestyle: str = "-",
+    marker: str = "o",
+    markerfacecolor=None,
+):
     rt_group = tables["rt_group"]
     rt_per_subj = tables["rt_per_subj"]
+    markerfacecolor = color if markerfacecolor is None else markerfacecolor
 
     if cfg.error_mode == "sem":
         sub = rt_group[rt_group["ABL"] == abl]
         if sub.empty:
             return
         x = _maybe_shift(sub["ILD"], cfg)
-        ax.errorbar(x, sub["mean"], yerr=sub["sem"], fmt="o", color=color,
-                    markersize=8.5, linewidth=0, elinewidth=1.5, capsize=3)
+        ax.errorbar(
+            x, sub["mean"], yerr=sub["sem"], fmt=marker, color=color,
+            markerfacecolor=markerfacecolor, markeredgecolor=color,
+            markersize=8.5, linewidth=0, elinewidth=1.5, capsize=3,
+        )
         return
 
     sub_ps = rt_per_subj[rt_per_subj["ABL"] == abl]
     for _, df_an in sub_ps.groupby("animal"):
         df_an = df_an.sort_values("ILD")
         ax.plot(_maybe_shift(df_an["ILD"], cfg), df_an["mean_rt"],
-                color=color, alpha=0.35, linewidth=1.5)
+                color=color, alpha=0.35, linewidth=1.5, linestyle=linestyle)
 
     sub = rt_group[rt_group["ABL"] == abl].sort_values("ILD")
     if sub.empty:
         return
     x = _maybe_shift(sub["ILD"], cfg)
-    ax.errorbar(x, sub["mean"], yerr=sub["sem"], fmt="o", color=color,
-                markersize=8.5, linewidth=0, elinewidth=1.5, capsize=3)
-    ax.plot(x, sub["mean"], color=color, linewidth=2.5)
+    ax.errorbar(
+        x, sub["mean"], yerr=sub["sem"], fmt=marker, color=color,
+        markerfacecolor=markerfacecolor, markeredgecolor=color,
+        markersize=8.5, linewidth=0, elinewidth=1.5, capsize=3,
+    )
+    ax.plot(x, sub["mean"], color=color, linewidth=2.5, linestyle=linestyle)
 
 
-def plot_mt_on_ax(ax, tables: dict, abl: int, color: str, cfg: GroupComparisonConfig):
+def plot_mt_on_ax(
+    ax,
+    tables: dict,
+    abl: int,
+    color: str,
+    cfg: GroupComparisonConfig,
+    *,
+    linestyle: str = "-",
+    marker: str = "o",
+    markerfacecolor=None,
+):
     mt_group = tables["mt_group"]
     mt_per_subj = tables["mt_per_subj"]
+    markerfacecolor = color if markerfacecolor is None else markerfacecolor
 
     if cfg.error_mode == "sem":
         sub = mt_group[mt_group["ABL"] == abl]
         if sub.empty:
             return
         x = _maybe_shift(sub["ILD"], cfg)
-        ax.errorbar(x, sub["mean"], yerr=sub["sem"], fmt="o", color=color,
-                    markersize=8.5, linewidth=0, elinewidth=1.5, capsize=3)
+        ax.errorbar(
+            x, sub["mean"], yerr=sub["sem"], fmt=marker, color=color,
+            markerfacecolor=markerfacecolor, markeredgecolor=color,
+            markersize=8.5, linewidth=0, elinewidth=1.5, capsize=3,
+        )
         return
 
     sub_ps = mt_per_subj[mt_per_subj["ABL"] == abl]
     for _, df_an in sub_ps.groupby("animal"):
         df_an = df_an.sort_values("ILD")
         ax.plot(_maybe_shift(df_an["ILD"], cfg), df_an["mean_mt"],
-                color=color, alpha=0.35, linewidth=1.5)
+                color=color, alpha=0.35, linewidth=1.5, linestyle=linestyle)
 
     sub = mt_group[mt_group["ABL"] == abl].sort_values("ILD")
     if sub.empty:
         return
     x = _maybe_shift(sub["ILD"], cfg)
-    ax.errorbar(x, sub["mean"], yerr=sub["sem"], fmt="o", color=color,
-                markersize=8.5, linewidth=0, elinewidth=1.5, capsize=3)
-    ax.plot(x, sub["mean"], color=color, linewidth=2.5)
+    ax.errorbar(
+        x, sub["mean"], yerr=sub["sem"], fmt=marker, color=color,
+        markerfacecolor=markerfacecolor, markeredgecolor=color,
+        markersize=8.5, linewidth=0, elinewidth=1.5, capsize=3,
+    )
+    ax.plot(x, sub["mean"], color=color, linewidth=2.5, linestyle=linestyle)
 
 
-def plot_psy_on_ax(ax, tables: dict, abl: int, color: str, cfg: GroupComparisonConfig):
+def plot_psy_on_ax(
+    ax,
+    tables: dict,
+    abl: int,
+    color: str,
+    cfg: GroupComparisonConfig,
+    *,
+    linestyle: str = "-",
+    marker: str = "o",
+    markerfacecolor=None,
+):
     psy_group = tables["psy_group"]
     psy_indiv = tables["psy_indiv_curves"]
     psy_mean  = tables["psy_mean_fits"]
+    markerfacecolor = color if markerfacecolor is None else markerfacecolor
 
     ax.axvline(0, color="gray", linestyle="--", alpha=0.7)
     ax.axhline(0.5, color="gray", linestyle="--", alpha=0.7)
@@ -118,7 +163,8 @@ def plot_psy_on_ax(ax, tables: dict, abl: int, color: str, cfg: GroupComparisonC
     if not sub.empty:
         x_vals = _maybe_shift(sub["ILD"], cfg)
         ax.errorbar(x_vals, sub["mean"], yerr=sub["sem"],
-                    fmt="o", color=color, markersize=8.5,
+                    fmt=marker, color=color, markersize=8.5,
+                    markerfacecolor=markerfacecolor, markeredgecolor=color,
                     linewidth=0, elinewidth=1.5, capsize=3)
 
     if abl in set(cfg.skip_psy_fits):
@@ -129,12 +175,12 @@ def plot_psy_on_ax(ax, tables: dict, abl: int, color: str, cfg: GroupComparisonC
             if abl_key != abl:
                 continue
             ax.plot(_maybe_shift(curve["xx"], cfg), curve["yy"],
-                    color=color, alpha=0.3, linewidth=1)
+                    color=color, alpha=0.3, linewidth=1, linestyle=linestyle)
 
     mean_fit = psy_mean.get(abl)
     if mean_fit:
         ax.plot(_maybe_shift(mean_fit["xx"], cfg), mean_fit["yy"],
-                color=color, linewidth=(3 if cfg.error_mode == "individuals" else 2))
+                color=color, linewidth=(3 if cfg.error_mode == "individuals" else 2), linestyle=linestyle)
 
 
 # ---------------------------

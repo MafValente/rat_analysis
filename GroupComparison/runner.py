@@ -19,8 +19,9 @@ from Helpers.DataHelpers import prepare_data
 
 
 def run_groupcomparison(
-    cohort_csv: str,
     views: List[ViewSpec],
+    cohort_csv: Optional[str] = None,
+    df: Optional[pd.DataFrame] = None,
     cfg: GroupComparisonConfig = GroupComparisonConfig(),
     fcfg: FilterConfig = FilterConfig(),
     style: PlotStyle = PlotStyle(),
@@ -34,7 +35,12 @@ def run_groupcomparison(
     - layout="views_3x3": returns main 3x3 fig + separate per-view JND comparison fig (old vs new individuals)
     - layout="abls_4x3": returns main 4x3 fig with JND inset inside psychometrics (group mean±SEM), no separate JND fig
     """
-    df = pd.read_csv(cohort_csv)
+    if df is None:
+        if cohort_csv is None:
+            raise ValueError("Pass either cohort_csv or df to run_groupcomparison().")
+        df = pd.read_csv(cohort_csv)
+    else:
+        df = df.copy()
 
     df = prepare_data(df, session_col="session", trial_col="trial")
     df = df[df["trial_is_repeat"] == False].copy()

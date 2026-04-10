@@ -8,7 +8,7 @@ import Helpers.DataHelpers as DataHelpers
 import matplotlib as mpl
 import pickle
 
-subject_file = "merged_ASD0049.csv"
+subject_file = "merged_ASD0046.csv"
 
 # ==============================================================
 # CONFIG: choose which line you're analyzing

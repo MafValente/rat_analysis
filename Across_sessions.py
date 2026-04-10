@@ -8,7 +8,18 @@ import Psychometric
 import Helpers.DataHelpers as DataHelpers
 from matplotlib.ticker import MaxNLocator
 
-subject_file = "merged_ASD0049.csv"
+subject_file = "merged_ASD0046.csv"
+
+LINE = "SHANK3"   # or "SHANK3"
+COHORT = "cohort1" # or "cohort1", etc
+
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
 
 """
 
@@ -34,16 +45,7 @@ d8P' ?88  d8P' `P  88P'  `d8P' ?88 ?8b,    ?8b,
 # ==============================================================
 # CONFIG: choose which line you're analyzing
 # ==============================================================
-LINE = "SHANK3"   # or "SHANK3"
-COHORT = "cohort1" # or "cohort1", etc
 
-BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
-
-LINE_ROOTS = {
-     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
-     ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
-     ("SHANK3", "cohort1"): "SHANK3_cohort1",
- }
 
 DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
 
