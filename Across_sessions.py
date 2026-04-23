@@ -8,7 +8,7 @@ import Psychometric
 import Helpers.DataHelpers as DataHelpers
 from matplotlib.ticker import MaxNLocator
 
-subject_file = "merged_ASD0046.csv"
+subject_file = "merged_ASD0049.csv"
 
 LINE = "SHANK3"   # or "SHANK3"
 COHORT = "cohort1" # or "cohort1", etc
