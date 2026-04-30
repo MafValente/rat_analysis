@@ -3,6 +3,7 @@ import os
 import pandas as pd
 import Helpers.DataHelpers as DataHelpers
 import argparse
+from pathlib import Path
 
 
 
@@ -74,6 +75,38 @@ def get_animals_for_cohort(line="CNTNAP2", cohort="cohort2", rat=None):
         if os.path.isdir(os.path.join(base_dir, entry)) and entry.startswith("ASD")
     ]
     return animals
+
+
+def _normalize_source_label(filename: str) -> str:
+    return Path(filename).name
+
+
+def _validate_one_session_per_source(merged_df: pd.DataFrame, *, source_col: str, session_col: str = "session") -> None:
+    source_to_sessions = (
+        merged_df[[source_col, session_col]]
+        .drop_duplicates()
+        .groupby(source_col)[session_col]
+        .nunique()
+    )
+    bad_sources = source_to_sessions[source_to_sessions != 1]
+    if not bad_sources.empty:
+        raise ValueError(
+            "Each daily CSV must map to exactly one merged session. "
+            f"Violations: {bad_sources.to_dict()}"
+        )
+
+    session_to_sources = (
+        merged_df[[source_col, session_col]]
+        .drop_duplicates()
+        .groupby(session_col)[source_col]
+        .nunique()
+    )
+    bad_sessions = session_to_sources[session_to_sources != 1]
+    if not bad_sessions.empty:
+        raise ValueError(
+            "Each merged session must come from exactly one daily CSV. "
+            f"Violations: {bad_sessions.to_dict()}"
+        )
 
 def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2"):
 
@@ -181,7 +214,7 @@ def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2")
                 long_value=6000,
             )
 
-            df["__source_file"] = file
+            df["__source_file"] = _normalize_source_label(file)
             df["__session_sort_key"] = DataHelpers._infer_file_date(filepath)  # <-- now from name out_YYMMDD
             df["__session_mtime"] = os.path.getmtime(filepath)
             merged_dataframes.append(df)
@@ -202,11 +235,15 @@ def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2")
         map_new_session = dict(zip(session_order["__source_file"], session_order["__new_session"]))
 
         merged_df["session"] = merged_df["__source_file"].map(map_new_session)
+        merged_df["source_file"] = merged_df["__source_file"]
+        merged_df["source_date"] = merged_df["__session_sort_key"]
 
         sort_cols = ["session"]
         if "trial" in merged_df.columns:
             sort_cols.append("trial")
         merged_df = merged_df.sort_values(sort_cols).reset_index(drop=True)
+
+        _validate_one_session_per_source(merged_df, source_col="source_file", session_col="session")
 
         merged_df = merged_df.drop(columns=["__source_file", "__session_sort_key", "__session_mtime"], errors="ignore")
 
@@ -371,6 +408,9 @@ def merge_subject_files_with_model(line="CNTNAP2", cohort="cohort2",
         return None
 
     merged_df = pd.concat(dfs, ignore_index=True)
+    sort_cols = [col for col in ["animal", "session", "trial"] if col in merged_df.columns]
+    if sort_cols:
+        merged_df = merged_df.sort_values(sort_cols).reset_index(drop=True)
 
     if output_file is None:
         output_file = os.path.join(base_dir, "merged_all_subjects.csv")

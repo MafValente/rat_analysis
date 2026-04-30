@@ -8,13 +8,13 @@ import Helpers.DataHelpers as DataHelpers
 import matplotlib as mpl
 import pickle
 
-subject_file = "merged_ASD0049.csv"
+subject_file = "merged_ASD0026.csv"
 
 # ==============================================================
 # CONFIG: choose which line you're analyzing
 # ==============================================================
-LINE = "SHANK3"   # or "SHANK3"
-COHORT = "cohort1" # or "cohort1", etc
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort3" # or "cohort1", etc
 
 BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 

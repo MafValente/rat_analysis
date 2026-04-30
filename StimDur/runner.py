@@ -15,9 +15,10 @@ from StimDur.prepare import (
 from StimDur.layouts import plot_stimdur_4x3_for_view, plot_kreg_4x3_by_abl_for_view
 
 def run_stimdur_comparison(
-    cohort_csv: str,
     views: List[ViewSpec],
     stimdur_specs: List[StimDurSpec],
+    cohort_csv: Optional[str] = None,
+    df: Optional[pd.DataFrame] = None,
     cfg: StimDurComparisonConfig = StimDurComparisonConfig(),
     fcfg: FilterConfig = FilterConfig(),
     style: PlotStyle = PlotStyle(),
@@ -25,7 +26,13 @@ def run_stimdur_comparison(
     stimdur_pretty: Optional[Dict[str, str]] = None,       # optional title mapping
     show: bool = True,
 ) -> Dict[str, Any]:
-    df = pd.read_csv(cohort_csv)
+    if df is None:
+        if cohort_csv is None:
+            raise ValueError("Provide either 'df' or 'cohort_csv' to run_stimdur_comparison.")
+        df = pd.read_csv(cohort_csv)
+    else:
+        df = df.copy()
+
     df = apply_filters(df, fcfg)
 
     if stimdur_colors is None:
