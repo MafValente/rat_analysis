@@ -1,5 +1,6 @@
 DataFiles/
 DataFiles/
+GroupComparison/_cache/
 __pycache__/
 *.pyc
 .DS_Store

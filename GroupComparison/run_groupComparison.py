@@ -34,11 +34,16 @@ import Helpers.DataHelpers as DataHelpers
 print("USING COHORT OVERLAY PLOTS")
 
 LINE = "CNTNAP2"
-COHORT_SELECTION = "all"   # "all", "cohort2", or ["cohort2", "cohort3"]
+COHORT_SELECTION = "cohort3"   # "all", "cohort2", or ["cohort2", "cohort3"]
 DATASET_SELECTIONS = None  # e.g. [("CNTNAP2", "cohort3"), ("SHANK3", "cohort1")]
 BASE_DATA_DIR = os.path.join(ROOT, "DataFiles")
 COHORT_SESSION_MIN = {"cohort2": 13}
 SESSION_EQUALIZATION_EXCLUDE = {"cohort3": {"ASD0022"}}
+MAKE_VIEWS_FIG = True
+MAKE_ABLS_FIG = True
+MAKE_JND_FIG = False
+USE_PREPARED_CACHE = True
+CACHE_DIR = os.path.join(ROOT, "GroupComparison", "_cache")
 
 
 def _dataset_sort_key(name: str):
@@ -117,13 +122,13 @@ def equalize_sessions_across_cohorts(df, dataset_names, exclude_animals_by_cohor
         for dataset_name, sessions in session_lists.items()
     }
 
-    keep_mask = df.apply(
-        lambda row: (
-            row["dataset_key"] not in allowed_sessions
-            or (pd.notna(row["session"]) and int(float(row["session"])) in allowed_sessions[row["dataset_key"]])
-        ),
-        axis=1,
-    )
+    dataset_keys = df["dataset_key"].astype(str)
+    session_num = pd.to_numeric(df["session"], errors="coerce")
+    keep_mask = pd.Series(True, index=df.index)
+
+    for dataset_name, sessions in allowed_sessions.items():
+        match_mask = dataset_keys == str(dataset_name)
+        keep_mask.loc[match_mask] = session_num.loc[match_mask].isin(sessions)
 
     print(f"Equalizing datasets to first {session_cap} level-16 sessions:", ", ".join(f"{c} -> {session_cap}" for c in sorted(allowed_sessions)))
     return df[keep_mask].copy()
@@ -144,6 +149,12 @@ def _cohort_offsets(cohorts, step):
         return {cohorts[0]: 0.0}
     center = (len(cohorts) - 1) / 2
     return {cohort: step * (i - center) for i, cohort in enumerate(cohorts)}
+
+
+def _title_with_single_cohort(base_title, cohorts):
+    if len(cohorts) == 1:
+        return f"{base_title} ({cohorts[0]})"
+    return base_title
 
 
 def add_views_jnd_inset(ax_parent, genotype, cohorts, group_jnd_by_view, cohort_styles, abl_colors, style):
@@ -218,11 +229,15 @@ def add_abls_jnd_inset(ax_parent, abl, genotypes, cohorts, group_jnd_by_view, ge
                 capsize=3,
             )
 
-    style_axes(ax_inset, style, title=None, xlabel="", ylabel="JND (dB)")
-    ax_inset.tick_params(axis="both", labelsize=max(8, style.tick_fs - 7))
+    inset_label_fs = max(8, style.label_fs - 10)
+    inset_tick_fs = max(7, style.tick_fs - 10)
+    ax_inset.set_ylabel("JND (dB)", fontsize=inset_label_fs, color="black")
+    ax_inset.yaxis.set_label_position("right")
+    ax_inset.yaxis.tick_right()
+    ax_inset.tick_params(axis="both", labelsize=inset_tick_fs)
     ax_inset.set_box_aspect(1)
     ax_inset.spines["top"].set_visible(False)
-    ax_inset.spines["right"].set_visible(False)
+    ax_inset.spines["left"].set_visible(False)
     ax_inset.grid(False)
     ax_inset.set_xticks(list(genotype_positions.values()))
     ax_inset.set_xticklabels([g.upper() for g in genotypes])
@@ -257,15 +272,22 @@ def plot_views_overlay(prepared, group_jnd_by_view, genotypes, cohorts, cfg, sty
         for abl in abls:
             if overlay.makefig1_chrono is not None:
                 DataHelpers.overlay_makefig1_rt(ax_rt, abl, overlay.makefig1_chrono, color=overlay.overlay_color, zorder=-1)
-            if overlay.makefig1_data is not None and abl != 50:
+        overlay_abls = [abl for abl in abls if abl != 50]
+        if overlay.makefig1_data is not None and overlay_abls:
+            if len(overlay_abls) > 1:
                 DataHelpers.overlay_makefig1_psychometrics(
-                    ax_psy, overlay.makefig1_data, abl=abl,
+                    ax_psy, overlay.makefig1_data, abl=None,
+                    color="black", show_individuals=False, use_abl_colors=False
+                )
+            else:
+                DataHelpers.overlay_makefig1_psychometrics(
+                    ax_psy, overlay.makefig1_data, abl=overlay_abls[0],
                     color="black", show_individuals=False, use_abl_colors=False
                 )
 
-        style_axes(ax_rt, style, f"{genotype} - RT", "ILD (dB)", "Mean RT (s)")
-        style_axes(ax_mt, style, f"{genotype} - MT", "ILD (dB)", "Mean MT (s)")
-        style_axes(ax_psy, style, f"{genotype} - Psychometric", "ILD (dB)", "P(Left)")
+        style_axes(ax_rt, style, _title_with_single_cohort(f"{genotype} - RT", cohorts), "ILD (dB)", "Mean RT (s)")
+        style_axes(ax_mt, style, _title_with_single_cohort(f"{genotype} - MT", cohorts), "ILD (dB)", "Mean MT (s)")
+        style_axes(ax_psy, style, _title_with_single_cohort(f"{genotype} - Psychometric", cohorts), "ILD (dB)", "P(Left)")
         ax_rt.set_xlim(*cfg.xlim_abs)
         ax_mt.set_xlim(*cfg.xlim_sym)
         ax_psy.set_xlim(*cfg.xlim_sym)
@@ -277,16 +299,21 @@ def plot_views_overlay(prepared, group_jnd_by_view, genotypes, cohorts, cfg, sty
     cohort_handles = []
     for cohort in cohorts:
         style_cfg = cohort_styles[cohort]
+        legend_marker = style_cfg["marker"] if len(cohorts) == 1 else None
         cohort_handles.append(
             plt.Line2D(
-                [], [], color="black", linestyle=style_cfg["linestyle"], marker=style_cfg["marker"],
+                [], [], color="black", linestyle=style_cfg["linestyle"], marker=legend_marker,
                 markerfacecolor=("black" if style_cfg["markerfacecolor"] is None else style_cfg["markerfacecolor"]),
                 markeredgecolor="black",
             )
         )
+    overlay_handle = plt.Line2D(
+        [], [], color="black", linestyle="-", marker="o",
+        markerfacecolor="black", markeredgecolor="black",
+    )
 
     fig.legend(abl_handles, [f"ABL {abl} dB" for abl in abls], loc="upper center", bbox_to_anchor=(0.35, 0.99), ncol=min(6, len(abl_handles)), fontsize=style.legend_fs)
-    fig.legend(cohort_handles, cohorts, loc="upper center", bbox_to_anchor=(0.82, 0.99), ncol=min(4, len(cohort_handles)), fontsize=style.legend_fs)
+    fig.legend(cohort_handles + [overlay_handle], cohorts + ["Headphone cohorts"], loc="upper center", bbox_to_anchor=(0.82, 0.99), ncol=min(4, len(cohort_handles) + 1), fontsize=style.legend_fs)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     return fig
 
@@ -323,9 +350,9 @@ def plot_abls_overlay(prepared, group_jnd_by_view, genotypes, cohorts, cfg, styl
                 color="black", show_individuals=False, use_abl_colors=False
             )
 
-        style_axes(ax_rt, style, f"ABL {abl} - RT", "ILD (dB)", "Mean RT (s)")
-        style_axes(ax_mt, style, f"ABL {abl} - MT", "ILD (dB)", "Mean MT (s)")
-        style_axes(ax_psy, style, f"ABL {abl} - Psychometric", "ILD (dB)", "P(Left)")
+        style_axes(ax_rt, style, _title_with_single_cohort(f"ABL {abl} - RT", cohorts), "ILD (dB)", "Mean RT (s)")
+        style_axes(ax_mt, style, _title_with_single_cohort(f"ABL {abl} - MT", cohorts), "ILD (dB)", "Mean MT (s)")
+        style_axes(ax_psy, style, _title_with_single_cohort(f"ABL {abl} - Psychometric", cohorts), "ILD (dB)", "P(Left)")
         ax_rt.set_xlim(*cfg.xlim_abs)
         ax_mt.set_xlim(*cfg.xlim_sym)
         ax_psy.set_xlim(*cfg.xlim_sym)
@@ -337,16 +364,21 @@ def plot_abls_overlay(prepared, group_jnd_by_view, genotypes, cohorts, cfg, styl
     cohort_handles = []
     for cohort in cohorts:
         style_cfg = cohort_styles[cohort]
+        legend_marker = style_cfg["marker"] if len(cohorts) == 1 else None
         cohort_handles.append(
             plt.Line2D(
-                [], [], color="black", linestyle=style_cfg["linestyle"], marker=style_cfg["marker"],
+                [], [], color="black", linestyle=style_cfg["linestyle"], marker=legend_marker,
                 markerfacecolor=("black" if style_cfg["markerfacecolor"] is None else style_cfg["markerfacecolor"]),
                 markeredgecolor="black",
             )
         )
+    overlay_handle = plt.Line2D(
+        [], [], color="black", linestyle="-", marker="o",
+        markerfacecolor="black", markeredgecolor="black",
+    )
 
     fig.legend(genotype_handles, [g.upper() for g in genotypes], loc="upper center", bbox_to_anchor=(0.35, 0.99), ncol=min(3, len(genotype_handles)), fontsize=style.legend_fs)
-    fig.legend(cohort_handles, cohorts, loc="upper center", bbox_to_anchor=(0.82, 0.99), ncol=min(4, len(cohort_handles)), fontsize=style.legend_fs)
+    fig.legend(cohort_handles + [overlay_handle], cohorts + ["Headphone cohorts"], loc="upper center", bbox_to_anchor=(0.82, 0.99), ncol=min(4, len(cohort_handles) + 1), fontsize=style.legend_fs)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     return fig
 
@@ -437,6 +469,68 @@ def plot_jnd_overlay_figure(jnd_indiv_by_view, genotypes, cohorts, cohort_styles
     return fig
 
 
+def _cache_path():
+    dataset_tag = "mixed" if DATASET_SELECTIONS else f"{LINE}_{str(COHORT_SELECTION).replace(' ', '')}"
+    return os.path.join(CACHE_DIR, f"groupcomparison_prepared_{dataset_tag}.pkl")
+
+
+def load_overlays(base_data_dir, *, need_rt_psy_overlay, need_jnd_overlay):
+    overlay = OverlaySpec(overlay_color="black")
+    jnd_overlay = JNDOverlaySpec(abl_color_map={20: "C0", 40: "C1", 60: "C3"})
+
+    if need_rt_psy_overlay:
+        with open(os.path.join(base_data_dir, "Old Data/ILD_task/fig1_plot_data.pkl"), "rb") as f:
+            makefig1_data = pickle.load(f)
+        with open(os.path.join(base_data_dir, "Old Data/ILD_task/fig1_chrono_plot_data.pkl"), "rb") as f:
+            makefig1_chrono = pickle.load(f)
+
+        overlay = OverlaySpec(
+            makefig1_data=makefig1_data,
+            makefig1_chrono=makefig1_chrono,
+            overlay_color="black",
+        )
+
+    if need_jnd_overlay:
+        with open(os.path.join(base_data_dir, "Old Data/ILD_task/jnd_analysis_data.pkl"), "rb") as f:
+            old_jnd_data = pickle.load(f)
+        jnd_overlay = JNDOverlaySpec(
+            old_jnd_data=old_jnd_data,
+            abl_color_map={20: "C0", 40: "C1", 60: "C3"},
+        )
+
+    return overlay, jnd_overlay
+
+
+def build_or_load_prepared(df_filtered, views, cfg, use_cache):
+    cache_path = _cache_path()
+    if use_cache and os.path.exists(cache_path):
+        with open(cache_path, "rb") as f:
+            cached = pickle.load(f)
+        return (
+            cached["prepared"],
+            cached["jnd_indiv_by_view"],
+            cached["group_jnd_by_view"],
+        )
+
+    prepared = build_prepared(df_filtered, views, cfg)
+    jnd_indiv_by_view = compute_jnd_individuals_by_view(prepared, skip_abl=50)
+    group_jnd_by_view = compute_group_jnd_by_view(jnd_indiv_by_view)
+
+    if use_cache:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        with open(cache_path, "wb") as f:
+            pickle.dump(
+                {
+                    "prepared": prepared,
+                    "jnd_indiv_by_view": jnd_indiv_by_view,
+                    "group_jnd_by_view": group_jnd_by_view,
+                },
+                f,
+            )
+
+    return prepared, jnd_indiv_by_view, group_jnd_by_view
+
+
 if DATASET_SELECTIONS:
     df_all, meta_all, dataset_info = load_dataset_selections(
         selections=DATASET_SELECTIONS,
@@ -476,26 +570,6 @@ mpl.rcParams["savefig.pad_inches"] = 0.6
 mpl.rcParams["font.family"] = "sans-serif"
 mpl.rcParams["font.sans-serif"] = ["Helvetica Neue", "Helvetica", "Arial", "sans-serif"]
 
-
-with open(os.path.join(BASE_DATA_DIR, "Old Data/ILD_task/fig1_plot_data.pkl"), "rb") as f:
-    makefig1_data = pickle.load(f)
-with open(os.path.join(BASE_DATA_DIR, "Old Data/ILD_task/fig1_chrono_plot_data.pkl"), "rb") as f:
-    makefig1_chrono = pickle.load(f)
-
-overlay = OverlaySpec(
-    makefig1_data=makefig1_data,
-    makefig1_chrono=makefig1_chrono,
-    overlay_color="black",
-)
-
-with open(os.path.join(BASE_DATA_DIR, "Old Data/ILD_task/jnd_analysis_data.pkl"), "rb") as f:
-    old_jnd_data = pickle.load(f)
-
-jnd_overlay = JNDOverlaySpec(
-    old_jnd_data=old_jnd_data,
-    abl_color_map={20: "C0", 40: "C1", 60: "C3"},
-)
-
 cfg = GroupComparisonConfig(
     error_mode="individuals",
     skip_psy_fits=(50,),
@@ -514,17 +588,33 @@ style = PlotStyle()
 df_filtered = apply_filters(df_plot, fcfg)
 df_filtered = apply_cohort_specific_session_min(df_filtered, COHORT_SESSION_MIN)
 df_filtered = equalize_sessions_across_cohorts(df_filtered, cohorts, SESSION_EQUALIZATION_EXCLUDE)
-prepared = build_prepared(df_filtered, views, cfg)
-jnd_indiv_by_view = compute_jnd_individuals_by_view(prepared, skip_abl=50)
-group_jnd_by_view = compute_group_jnd_by_view(jnd_indiv_by_view)
+prepared, jnd_indiv_by_view, group_jnd_by_view = build_or_load_prepared(
+    df_filtered, views, cfg, USE_PREPARED_CACHE
+)
+overlay, jnd_overlay = load_overlays(
+    BASE_DATA_DIR,
+    need_rt_psy_overlay=(MAKE_VIEWS_FIG or MAKE_ABLS_FIG),
+    need_jnd_overlay=MAKE_JND_FIG,
+)
 
-fig1 = plot_views_overlay(prepared, group_jnd_by_view, genotypes, cohorts, cfg, style, overlay, cohort_styles)
-fig2 = plot_abls_overlay(prepared, group_jnd_by_view, genotypes, cohorts, cfg, style, overlay, cohort_styles)
-fig_jnd = plot_jnd_overlay_figure(jnd_indiv_by_view, genotypes, cohorts, cohort_styles, jnd_overlay, style)
+fig1 = None
+fig2 = None
+fig_jnd = None
+out1 = None
+out2 = None
+out_jnd = None
 
-out1 = {"figure": fig1, "prepared": prepared, "jnd_indiv_by_view": jnd_indiv_by_view, "group_jnd_by_view": group_jnd_by_view}
-out2 = {"figure": fig2, "prepared": prepared, "jnd_indiv_by_view": jnd_indiv_by_view, "group_jnd_by_view": group_jnd_by_view}
-out_jnd = {"figure": fig_jnd, "jnd_indiv_by_view": jnd_indiv_by_view}
+if MAKE_VIEWS_FIG:
+    fig1 = plot_views_overlay(prepared, group_jnd_by_view, genotypes, cohorts, cfg, style, overlay, cohort_styles)
+    out1 = {"figure": fig1, "prepared": prepared, "jnd_indiv_by_view": jnd_indiv_by_view, "group_jnd_by_view": group_jnd_by_view}
+
+if MAKE_ABLS_FIG:
+    fig2 = plot_abls_overlay(prepared, group_jnd_by_view, genotypes, cohorts, cfg, style, overlay, cohort_styles)
+    out2 = {"figure": fig2, "prepared": prepared, "jnd_indiv_by_view": jnd_indiv_by_view, "group_jnd_by_view": group_jnd_by_view}
+
+if MAKE_JND_FIG:
+    fig_jnd = plot_jnd_overlay_figure(jnd_indiv_by_view, genotypes, cohorts, cohort_styles, jnd_overlay, style)
+    out_jnd = {"figure": fig_jnd, "jnd_indiv_by_view": jnd_indiv_by_view}
 
 plt.show()
 

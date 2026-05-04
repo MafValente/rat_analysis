@@ -189,7 +189,7 @@ def prep_psy(
 def build_prepared(df: pd.DataFrame, views: List[ViewSpec], cfg: GroupComparisonConfig) -> Dict[str, dict]:
     prepared: Dict[str, dict] = {}
     for v in views:
-        df_v = v.selector(df.copy())
+        df_v = v.selector(df)
         rt_per_subj, rt_group = prep_rt(df_v)
         mt_per_subj, mt_group = prep_mt(df_v)
 
