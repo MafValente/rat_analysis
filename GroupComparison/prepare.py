@@ -108,6 +108,7 @@ def prep_psy(
     df_in: pd.DataFrame,
     do_individual_fits: bool,
     *,
+    aggregation: str = "animal_trials",
     skip_jnd_abl: int = 50,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict, Dict, pd.DataFrame]:
     """
@@ -118,11 +119,89 @@ def prep_psy(
     so we don't recompute psychometrics later.
     """
     all_pts: List[dict] = []
+    param_rows: List[dict] = []
     per_subject_curves: Dict[tuple, dict] = {}
     jnd_rows: List[dict] = []
+    valid_aggregations = {"animal_trials", "session_then_animal"}
+    if aggregation not in valid_aggregations:
+        raise ValueError(f"aggregation must be one of {sorted(valid_aggregations)}")
 
     for subject, df_subj in df_in.groupby("animal", sort=False):
-        results = Psychometric.compute_psychometrics_by_ABL(df_subj, model="my_psycho")
+        if aggregation == "session_then_animal" and "session" in df_subj.columns:
+            session_rows: List[dict] = []
+            for _, df_sess in df_subj.groupby("session", sort=False):
+                results = Psychometric.compute_psychometrics_by_ABL(df_sess, model="my_psycho")
+                for abl, res in results.items():
+                    abl_i = int(abl)
+                    ILDs = np.asarray(res["ILDs"])
+                    pleft = np.asarray(res["PropLeft"], dtype=float)
+                    for ild, val in zip(ILDs, pleft):
+                        session_rows.append(
+                            {
+                                "subject": subject,
+                                "session": df_sess["session"].iloc[0] if "session" in df_sess.columns and not df_sess.empty else pd.NA,
+                                "ABL": abl_i,
+                                "ILD": float(ild),
+                                "PropLeft": float(val),
+                            }
+                        )
+
+            if session_rows:
+                session_points = pd.DataFrame(session_rows)
+                session_points["ABL"] = pd.to_numeric(session_points["ABL"], errors="coerce")
+                session_points["ILD"] = pd.to_numeric(session_points["ILD"], errors="coerce")
+                session_points["PropLeft"] = pd.to_numeric(session_points["PropLeft"], errors="coerce")
+                session_points = session_points.dropna(subset=["ABL", "ILD", "PropLeft"]).copy()
+                session_points["ABL"] = session_points["ABL"].astype(int)
+
+                subj_points = (
+                    session_points.groupby(["subject", "ABL", "ILD"])["PropLeft"]
+                    .agg(mean="mean", sem=sem, n="count")
+                    .reset_index()
+                )
+            else:
+                session_points = pd.DataFrame(columns=["subject", "session", "ABL", "ILD", "PropLeft"])
+                subj_points = pd.DataFrame(columns=["subject", "ABL", "ILD", "mean", "sem", "n"])
+
+            results = {}
+            for abl, df_abl in subj_points.groupby("ABL", sort=False):
+                df_abl = df_abl.sort_values("ILD")
+                ILDs = df_abl["ILD"].to_numpy(dtype=float)
+                mean_vals = df_abl["mean"].to_numpy(dtype=float)
+                n_trials = np.full_like(ILDs, 50)
+                pars = None
+                L = np.nan
+                xx = yy = None
+                if len(ILDs) >= 4 and np.isfinite(mean_vals).all():
+                    try:
+                        pars, L, xx, yy = Psychometric.fit_and_plot_psychometric(
+                            ILDs, mean_vals, model="my_psycho", n_trials=n_trials, show_plot=False
+                        )
+                    except Exception:
+                        pars = None
+                        L = np.nan
+                        xx = yy = None
+                results[int(abl)] = {
+                    "ILDs": ILDs,
+                    "PropLeft": mean_vals,
+                    "n_trials": n_trials,
+                    "pars": pars,
+                    "L": L,
+                    "xx": xx,
+                    "yy": yy,
+                }
+        else:
+            results = Psychometric.compute_psychometrics_by_ABL(df_subj, model="my_psycho")
+            session_points = None
+            subj_points = pd.DataFrame(
+                [
+                    {"subject": subject, "ABL": int(abl), "ILD": float(ild), "PropLeft": float(val)}
+                    for abl, res in results.items()
+                    for ild, val in zip(np.asarray(res["ILDs"]), np.asarray(res["PropLeft"], dtype=float))
+                ]
+                )
+            if not subj_points.empty:
+                subj_points = subj_points.rename(columns={"PropLeft": "mean"})
 
         # ---- JND from same results (no recompute later) ----
         jnd_df = DataHelpers.compute_jnd_by_ABL(results, skip_ABL=skip_jnd_abl)
@@ -133,30 +212,59 @@ def prep_psy(
                 )
 
         # ---- points + optional individual fits ----
+        if aggregation == "session_then_animal":
+            for _, row in subj_points.iterrows():
+                all_pts.append(
+                    {
+                        "subject": subject,
+                        "ABL": int(row["ABL"]),
+                        "ILD": float(row["ILD"]),
+                        "PropLeft": float(row["mean"]),
+                    }
+                )
+        else:
+            for abl, res in results.items():
+                abl_i = int(abl)
+                ILDs = np.asarray(res["ILDs"])
+                pleft = np.asarray(res["PropLeft"], dtype=float)
+
+                for ild, val in zip(ILDs, pleft):
+                    all_pts.append({"subject": subject, "ABL": abl_i, "ILD": float(ild), "PropLeft": float(val)})
+
+        if do_individual_fits:
+            for abl, res in results.items():
+                if res.get("xx") is not None and res.get("yy") is not None:
+                    per_subject_curves[(subject, int(abl))] = dict(xx=res["xx"], yy=res["yy"])
+
         for abl, res in results.items():
-            abl_i = int(abl)
-            ILDs = np.asarray(res["ILDs"])
-            pleft = np.asarray(res["PropLeft"], dtype=float)
-
-            for ild, val in zip(ILDs, pleft):
-                all_pts.append({"subject": subject, "ABL": abl_i, "ILD": float(ild), "PropLeft": float(val)})
-
-            if do_individual_fits and len(ILDs) >= 4 and np.isfinite(pleft).all():
-                n_trials = np.full_like(ILDs, 50)
-                try:
-                    _, _, xx, yy = Psychometric.fit_and_plot_psychometric(
-                        ILDs, pleft, model="my_psycho", n_trials=n_trials, show_plot=False
-                    )
-                    per_subject_curves[(subject, abl_i)] = dict(xx=xx, yy=yy)
-                except Exception:
-                    pass
+            pars = res.get("pars")
+            if pars is None or len(pars) < 4 or not np.all(np.isfinite(np.asarray(pars[:4], dtype=float))):
+                continue
+            param_rows.append(
+                {
+                    "animal": subject,
+                    "line": df_subj["line"].iloc[0] if "line" in df_subj.columns and not df_subj.empty else pd.NA,
+                    "cohort": df_subj["cohort"].iloc[0] if "cohort" in df_subj.columns and not df_subj.empty else pd.NA,
+                    "genotype": df_subj["genotype"].iloc[0] if "genotype" in df_subj.columns and not df_subj.empty else pd.NA,
+                    "dataset_key": df_subj["dataset_key"].iloc[0] if "dataset_key" in df_subj.columns and not df_subj.empty else pd.NA,
+                    "ABL": int(abl),
+                    "slope_a": float(pars[0]),
+                    "bias_b": float(pars[1]),
+                    "lower_c": float(pars[2]),
+                    "upper_d": float(pars[3]),
+                }
+            )
 
     points = pd.DataFrame(all_pts, columns=["subject", "ABL", "ILD", "PropLeft"])
     jnd_indiv = pd.DataFrame(jnd_rows, columns=["subject", "ABL", "JND"])
+    params = pd.DataFrame(
+        param_rows,
+        columns=["animal", "line", "cohort", "genotype", "dataset_key", "ABL", "slope_a", "bias_b", "lower_c", "upper_d"],
+    )
 
     if points.empty:
         psy_group = pd.DataFrame(columns=["ABL", "ILD", "mean", "sem", "n"])
-        return points, psy_group, per_subject_curves, {}, jnd_indiv
+        return points, psy_group, per_subject_curves, {}, jnd_indiv, params
 
     psy_group = (
         points.groupby(["ABL", "ILD"])["PropLeft"]
@@ -183,7 +291,7 @@ def prep_psy(
         except Exception:
             mean_fits[int(abl)] = None
 
-    return points, psy_group, per_subject_curves, mean_fits, jnd_indiv
+    return points, psy_group, per_subject_curves, mean_fits, jnd_indiv, params
 
 
 def build_prepared(df: pd.DataFrame, views: List[ViewSpec], cfg: GroupComparisonConfig) -> Dict[str, dict]:
@@ -193,8 +301,11 @@ def build_prepared(df: pd.DataFrame, views: List[ViewSpec], cfg: GroupComparison
         rt_per_subj, rt_group = prep_rt(df_v)
         mt_per_subj, mt_group = prep_mt(df_v)
 
-        psy_points, psy_group, psy_indiv, psy_mean, jnd_indiv = prep_psy(
-            df_v, do_individual_fits=(cfg.error_mode == "individuals"), skip_jnd_abl=50
+        psy_points, psy_group, psy_indiv, psy_mean, jnd_indiv, psy_params = prep_psy(
+            df_v,
+            do_individual_fits=(cfg.error_mode == "individuals"),
+            aggregation=cfg.psychometric_aggregation,
+            skip_jnd_abl=50,
         )
 
         prepared[v.name] = dict(
@@ -203,6 +314,7 @@ def build_prepared(df: pd.DataFrame, views: List[ViewSpec], cfg: GroupComparison
             psy_points=psy_points, psy_group=psy_group,
             psy_indiv_curves=psy_indiv, psy_mean_fits=psy_mean,
             jnd_indiv=jnd_indiv,   # <<< stored here
+            psy_params=psy_params,
             df_view=df_v,          # keep for debugging / backwards-compat
         )
     return prepared

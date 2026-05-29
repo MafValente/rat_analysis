@@ -29,6 +29,7 @@ def run_groupcomparison(
     jnd_overlay: JNDOverlaySpec = JNDOverlaySpec(),
     layout: str = "views_3x3",   # "views_3x3" or "abls_4x3"
     view_colors: Optional[Dict[str, str]] = None,
+    view_styles: Optional[Dict[str, dict]] = None,
     show: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -103,6 +104,7 @@ def run_groupcomparison(
             view_colors=view_colors,
             group_jnd_by_view=group_jnd_by_view,
             add_inset=True,
+            view_styles=view_styles,
         )
         figs["main"] = fig_main
 

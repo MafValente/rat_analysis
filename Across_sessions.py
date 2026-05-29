@@ -8,10 +8,10 @@ import Psychometric
 import Helpers.DataHelpers as DataHelpers
 from matplotlib.ticker import MaxNLocator
 
-subject_file = "merged_ASD0049.csv"
+subject_file = "merged_ASD0053.csv"
 
-LINE = "SHANK3"   # or "SHANK3"
-COHORT = "cohort1" # or "cohort1", etc
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort3" # or "cohort1", etc
 
 BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 
@@ -63,7 +63,7 @@ print(df["repeated_trial"].astype(str).str.strip().str.upper().value_counts(drop
 # --- Prep session(s) data
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
 
-df = df[df["training_level"]==16].copy()
+df = df[df["training_level"]<16].copy()
 
 df_valid = df[df["trial_is_repeat"]==False].copy()
 
@@ -478,5 +478,3 @@ print("Excluded sessions:")
 for line in report:
     print("-", line)
 
-# for use in deeper analysis I guess
-# %%

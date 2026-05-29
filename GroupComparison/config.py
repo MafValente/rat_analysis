@@ -40,6 +40,16 @@ class PlotStyle:
 class GroupComparisonConfig:
     error_mode: str = "individuals"   # "sem" or "individuals"
     skip_psy_fits: Tuple[int, ...] = (50,)
+    psychometric_aggregation: str = "animal_trials"
+    # "animal_trials" = pool all filtered trials per animal before psychometric fit
+    # "session_then_animal" = compute per-session psychometrics, average sessions within animal, then fit
+    summary_abort_types: Tuple[str, ...] = ("Fixation", "MT+", "RT-")
+    # Abort types counted in the summary-metrics panel.
+    # Excludes CNP by default so "failed to start" aborts stay out of the plot.
+    overlay_speed_distance_cm: float = 8.0
+    current_speed_distance_cm: float = 4.65
+    # Distance travelled for the movement-speed panel, in centimeters.
+    # Old overlay and current cohorts can differ, so we keep both easy to edit here.
     xlim_sym: Tuple[float, float] = (-18.5, 18.5)
     xlim_abs: Tuple[float, float] = (0, 19)
     ylim_rt: Tuple[float, float] = (0, 0.35)
@@ -52,6 +62,7 @@ class OverlaySpec:
     """Old neurotypical overlays for RT + psychometric (from make_fig1 pickles)."""
     makefig1_data: Optional[dict] = None
     makefig1_chrono: Optional[dict] = None
+    makefig1_bias: Optional[dict] = None
     overlay_color: str = "black"
 
 

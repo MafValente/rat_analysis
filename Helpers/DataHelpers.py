@@ -386,8 +386,17 @@ def compute_bias(df):
         return np.nan
     n_neg = (valid_group["ILD"] < 0).sum()
     n_pos = (valid_group["ILD"] > 0).sum()
-    wrong_right = ((valid_group["response_poke"] == 1) & (valid_group["ILD"] < 0)).sum()
-    wrong_left = ((valid_group['response_poke'] == -1) & (valid_group["ILD"] > 0)).sum()
+    if n_neg == 0 or n_pos == 0:
+        return np.nan
+    resp = pd.to_numeric(valid_group["response_poke"], errors="coerce")
+    if resp.dropna().isin([2, 3]).any():
+        choice = pd.Series(np.where(resp == 3, 1, np.where(resp == 2, -1, np.nan)), index=valid_group.index)
+    elif resp.dropna().isin([-1, 1]).any():
+        choice = resp
+    else:
+        choice = resp
+    wrong_right = ((choice == 1) & (valid_group["ILD"] < 0)).sum()
+    wrong_left = ((choice == -1) & (valid_group["ILD"] > 0)).sum()
     frac_wrong_right = wrong_right / n_neg if n_neg > 0 else 0
     frac_wrong_left = wrong_left / n_pos if n_pos > 0 else 0
     

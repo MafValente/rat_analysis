@@ -27,6 +27,7 @@ LINE_ROOTS = {
     ("CNTNAP2", "cohort1"): "CNTNAP2_cohort1",
     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
     ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
+    ("CNTNAP2", "cohort4"): "CNTNAP2_cohort4",
     ("SHANK3",  "cohort1"): "SHANK3_cohort1",
     # add more as needed
 }
@@ -35,7 +36,16 @@ def get_base_dir(line="CNTNAP2", cohort="cohort2"):
     """
     Return the full base_dir for a given line + cohort.
     """
-    return os.path.join(BASE_DATA_DIR, LINE_ROOTS[(line, cohort)])
+    key = (line, cohort)
+    folder = LINE_ROOTS.get(key, f"{line}_{cohort}")
+    base_dir = os.path.join(BASE_DATA_DIR, folder)
+    if not os.path.isdir(base_dir):
+        known = ", ".join(f"{known_line} {known_cohort}" for known_line, known_cohort in sorted(LINE_ROOTS))
+        raise FileNotFoundError(
+            f"Data folder not found for {line} {cohort}: {base_dir}\n"
+            f"Known configured datasets: {known}"
+        )
+    return base_dir
 
 
 def get_animals_for_cohort(line="CNTNAP2", cohort="cohort2", rat=None):

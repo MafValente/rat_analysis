@@ -98,6 +98,7 @@ def plot_abls_4x3(
     view_colors: Dict[str, str],
     group_jnd_by_view: Dict[str, "pd.DataFrame"],
     add_inset: bool = True,
+    view_styles: Optional[Dict[str, dict]] = None,
 ) -> plt.Figure:
     """
     Rows = ABLs, Cols = RT/MT/Psy
@@ -118,10 +119,11 @@ def plot_abls_4x3(
 
         for vn in view_names:
             c = view_colors.get(vn, "gray")
+            style_cfg = (view_styles or {}).get(vn, {})
             tables = prepared[vn]
-            plot_rt_on_ax(ax_rt, tables, abl, c, cfg)
-            plot_mt_on_ax(ax_mt, tables, abl, c, cfg)
-            plot_psy_on_ax(ax_psy, tables, abl, c, cfg)
+            plot_rt_on_ax(ax_rt, tables, abl, c, cfg, **style_cfg)
+            plot_mt_on_ax(ax_mt, tables, abl, c, cfg, **style_cfg)
+            plot_psy_on_ax(ax_psy, tables, abl, c, cfg, **style_cfg)
 
         # overlays
         if overlay.makefig1_chrono is not None:
@@ -144,7 +146,22 @@ def plot_abls_4x3(
         apply_50_tick_labels(ax_psy)
 
     # legend = views
-    handles = [plt.Line2D([], [], color=view_colors[vn], marker="o", linestyle="None") for vn in view_names]
+    handles = [
+        plt.Line2D(
+            [],
+            [],
+            color=view_colors[vn],
+            marker=(view_styles or {}).get(vn, {}).get("marker", "o"),
+            linestyle=(view_styles or {}).get(vn, {}).get("linestyle", "None"),
+            markerfacecolor=(
+                view_colors[vn]
+                if (view_styles or {}).get(vn, {}).get("markerfacecolor", None) is None
+                else (view_styles or {}).get(vn, {}).get("markerfacecolor")
+            ),
+            markeredgecolor=view_colors[vn],
+        )
+        for vn in view_names
+    ]
     fig.legend(handles, view_names, loc="upper center", ncol=min(6, len(view_names)), fontsize=style.legend_fs)
     fig.tight_layout(rect=[0, 0, 1, 0.92])
 
