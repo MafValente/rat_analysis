@@ -118,7 +118,171 @@ def _validate_one_session_per_source(merged_df: pd.DataFrame, *, source_col: str
             f"Violations: {bad_sessions.to_dict()}"
         )
 
-def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2"):
+def _get_session_rules(session_edits, animal):
+    if not session_edits:
+        return []
+
+    rules = []
+    for key in (animal, str(animal), "all", "*"):
+        if key in session_edits:
+            value = session_edits[key]
+            rules.extend(value if isinstance(value, list) else [value])
+    return rules
+
+
+def _matching_session_rules(rules, file):
+    matches = []
+    for rule in rules:
+        rule_file = rule.get("file") or rule.get("source_file")
+        if rule_file is None:
+            continue
+        if _normalize_source_label(rule_file) == _normalize_source_label(file):
+            matches.append(rule)
+    return matches
+
+
+def _find_trial_col(df, trial_col=None):
+    if trial_col and trial_col in df.columns:
+        return trial_col
+    candidates = ["trial", "trial_index", "trial_number", "trial_num", "trialID"]
+    return next((col for col in candidates if col in df.columns), None)
+
+
+def _coerce_repeated_trial(df):
+    if "repeated_trial" not in df.columns:
+        df["repeated_trial"] = pd.Series(pd.array([pd.NA] * len(df), dtype="boolean"))
+        return df
+
+    if not pd.api.types.is_bool_dtype(df["repeated_trial"]):
+        mapped = (
+            df["repeated_trial"]
+            .astype("string")
+            .str.strip()
+            .str.upper()
+            .map({
+                "TRUE": True,
+                "FALSE": False,
+                "1": True,
+                "0": False,
+                "YES": True,
+                "NO": False,
+            })
+        )
+        df["repeated_trial"] = pd.Series(pd.array(mapped, dtype="boolean"))
+    return df
+
+
+def _apply_session_rules(df, file, rules):
+    original_rows = len(df)
+    for rule in rules:
+        action = rule.get("action", "drop_from_trial")
+        trial_col = _find_trial_col(df, rule.get("trial_col"))
+
+        if action == "drop_entire_session":
+            print(f"🧹 Removing entire session file {file} ({len(df)} rows)")
+            return df.iloc[0:0].copy()
+
+        if action in {"drop_from_trial", "mark_repeated_from"}:
+            if trial_col is None:
+                raise ValueError(
+                    f"Cannot apply {action} to {file}: no trial column found. "
+                    "Pass trial_col in the rule."
+                )
+            start_trial = int(rule["start_trial"])
+            trial_num = pd.to_numeric(df[trial_col], errors="coerce")
+            mask = trial_num >= start_trial
+
+            if action == "drop_from_trial":
+                removed = int(mask.sum())
+                df = df.loc[~mask].copy()
+                print(f"🧹 Removed {removed} rows from {file} where {trial_col} >= {start_trial}")
+            else:
+                changed = int(mask.sum())
+                df = _coerce_repeated_trial(df)
+                df.loc[mask, "repeated_trial"] = True
+                df["repeated_trial"] = df["repeated_trial"].astype("boolean")
+                print(f"🧹 Marked {changed} rows repeated in {file} where {trial_col} >= {start_trial}")
+            continue
+
+        if action == "drop_trial_range":
+            if trial_col is None:
+                raise ValueError(
+                    f"Cannot apply {action} to {file}: no trial column found. "
+                    "Pass trial_col in the rule."
+                )
+            start_trial = rule.get("start_trial")
+            end_trial = rule.get("end_trial")
+            trial_num = pd.to_numeric(df[trial_col], errors="coerce")
+            mask = pd.Series(True, index=df.index)
+            if start_trial is not None:
+                mask &= trial_num >= int(start_trial)
+            if end_trial is not None:
+                mask &= trial_num <= int(end_trial)
+            removed = int(mask.sum())
+            df = df.loc[~mask].copy()
+            print(
+                f"🧹 Removed {removed} rows from {file} where "
+                f"{trial_col} is in [{start_trial}, {end_trial}]"
+            )
+            continue
+
+        raise ValueError(f"Unknown session edit action for {file}: {action}")
+
+    if len(df) != original_rows:
+        df = df.reset_index(drop=True)
+    return df
+
+
+def _apply_rt_value_rules(merged_df, rt_value_edits):
+    if not rt_value_edits:
+        return merged_df
+
+    out = merged_df.copy()
+    if "rt_value_valid" not in out.columns:
+        out["rt_value_valid"] = True
+    else:
+        out["rt_value_valid"] = out["rt_value_valid"].fillna(True).astype(bool)
+    if "rt_value_note" not in out.columns:
+        out["rt_value_note"] = pd.NA
+
+    for rule in rt_value_edits:
+        setup_col = rule.get("setup_col", "box")
+        date_col = rule.get("date_col", "source_date")
+        rt_col = rule.get("rt_col", "timed_rt")
+        missing = [col for col in [setup_col, date_col, rt_col] if col not in out.columns]
+        if missing:
+            raise KeyError(f"RT value edit cannot be applied; missing columns: {missing}")
+
+        dates = pd.to_datetime(out[date_col], errors="coerce").dt.normalize()
+        start = pd.to_datetime(rule["start_date"]).normalize()
+        end = pd.to_datetime(rule["end_date"]).normalize()
+        mask = dates.ge(start) & dates.le(end)
+
+        if "setup" in rule:
+            setup = pd.to_numeric(out[setup_col], errors="coerce")
+            mask &= setup.eq(float(rule["setup"]))
+
+        if "animal" in rule and "animal" in out.columns:
+            animals = rule["animal"]
+            if isinstance(animals, str):
+                animals = [animals]
+            wanted = {str(animal).strip() for animal in animals}
+            mask &= out["animal"].astype("string").str.strip().isin(wanted)
+
+        affected = int(mask.sum())
+        out.loc[mask, "rt_value_valid"] = False
+        out.loc[mask, "rt_value_note"] = rule.get("reason", "invalid numeric timed_rt")
+        out.loc[mask, rt_col] = pd.NA
+        print(
+            f"🧹 Set {rt_col}=NaN for {affected} rows "
+            f"from {start.date()} to {end.date()}"
+            + (f" on setup {rule['setup']}" if "setup" in rule else "")
+        )
+
+    return out
+
+
+def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2", session_edits=None, rt_value_edits=None):
 
     """
     Merge all raw session CSVs for one subject into merged_<rat>.csv
@@ -131,6 +295,7 @@ def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2")
     folder_name = os.path.basename(os.path.normpath(input_dir))
     output_dir = base_dir
     output_file = os.path.join(output_dir, f"merged_{folder_name}.csv")
+    session_rules = _get_session_rules(session_edits, folder_name)
 
 # def merge_session_files(input_rat, output_dir=None, output_file=None):
 #     base_dir = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/"
@@ -139,31 +304,6 @@ def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2")
 #     folder_name = os.path.basename(os.path.normpath(input_dir))
 #     output_dir = base_dir
 #     output_file = os.path.join(output_dir, f"merged_{folder_name}.csv")
-
-    if folder_name == "ASD0013":
-         DataHelpers.mark_repeated_from(
-            os.path.join(base_dir, "ASD0013", "out_ASD0013_251014.csv"),
-            start_trial=6690,
-        )
-        
-    if folder_name == "ASD0018":
-        DataHelpers.mark_repeated_from(
-        os.path.join(base_dir, "ASD0018", "ASD0018_out_251014.csv"),
-            start_trial=7370)
-        
-        DataHelpers.mark_repeated_from(
-        os.path.join(base_dir, "ASD0018", "ASD0018_out_251015.csv"),
-            start_trial=8000)
-
-        DataHelpers.mark_repeated_from(
-        os.path.join(base_dir, "ASD0018", "out_ASD0018_251028.csv"),
-            start_trial=10900)
-        
-        DataHelpers.mark_repeated_from(
-        os.path.join(base_dir, "ASD0018", "out_ASD0018_251127.csv"),
-            start_trial=22250
-
-    )
 
     all_files = list_csv_files(input_dir)
     if not all_files:
@@ -196,12 +336,27 @@ def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2")
             print(f"⚠️ Skipping {f}: could not read header ({e})")
 
     print(f"Total unique columns across all files: {len(all_columns)}")
+    if any(rule.get("action") == "mark_repeated_from" for rule in session_rules) and "repeated_trial" not in new_columns:
+        all_columns.append("repeated_trial")
+        new_columns.add("repeated_trial")
+        print("Added 'repeated_trial' to merged columns because a session edit uses mark_repeated_from.")
 
     # Merge all data
     for file in all_files:
         filepath = os.path.join(input_dir, file)
         try:
+            matching_rules = _matching_session_rules(session_rules, file)
+            if any(rule.get("action") == "drop_entire_session" for rule in matching_rules):
+                print(f"🧹 Skipping {file}: configured as drop_entire_session")
+                continue
+
             df = pd.read_csv(filepath)
+            if matching_rules:
+                df = _apply_session_rules(df, file, matching_rules)
+                if df.empty:
+                    print(f"🧹 No rows left after edits for {file}; skipping.")
+                    continue
+
             # reindex to ensure all columns exist, fill missing with NaN
             df = df.reindex(columns=all_columns)
 
@@ -247,6 +402,7 @@ def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2")
         merged_df["session"] = merged_df["__source_file"].map(map_new_session)
         merged_df["source_file"] = merged_df["__source_file"]
         merged_df["source_date"] = merged_df["__session_sort_key"]
+        merged_df = _apply_rt_value_rules(merged_df, rt_value_edits)
 
         sort_cols = ["session"]
         if "trial" in merged_df.columns:
@@ -269,7 +425,7 @@ def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2")
         return  # <-- ensure function exits if nothing merged
 
 
-def merge_session_files(line="CNTNAP2", cohort="cohort2", rat=None):
+def merge_session_files(line="CNTNAP2", cohort="cohort2", rat=None, session_edits=None, rt_value_edits=None):
     """
     Merge raw session CSVs for either:
     - one rat, if rat is provided
@@ -287,7 +443,13 @@ def merge_session_files(line="CNTNAP2", cohort="cohort2", rat=None):
 
     print(f"Processing {len(animals)} animal(s) for {line} {cohort}: {', '.join(animals)}")
     for animal in animals:
-        _merge_single_rat_session_files(animal, line=line, cohort=cohort)
+        _merge_single_rat_session_files(
+            animal,
+            line=line,
+            cohort=cohort,
+            session_edits=session_edits,
+            rt_value_edits=rt_value_edits,
+        )
 """
    # --- NEW PART: merge into setup-level file ---
     # Split by setup and save per-subject per-setup merged files
