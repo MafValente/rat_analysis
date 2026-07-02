@@ -135,6 +135,7 @@ def _matching_session_rules(rules, file):
     for rule in rules:
         rule_file = rule.get("file") or rule.get("source_file")
         if rule_file is None:
+            matches.append(rule)
             continue
         if _normalize_source_label(rule_file) == _normalize_source_label(file):
             matches.append(rule)
@@ -226,6 +227,33 @@ def _apply_session_rules(df, file, rules):
             )
             continue
 
+        if action == "drop_block":
+            block_col = rule.get("block_col", "block")
+            if block_col not in df.columns:
+                raise ValueError(
+                    f"Cannot apply {action} to {file}: no block column named {block_col!r} found. "
+                    "Pass block_col in the rule if needed."
+                )
+
+            blocks = rule.get("block", rule.get("blocks"))
+            if blocks is None:
+                raise ValueError(f"Cannot apply {action} to {file}: pass block=... or blocks=[...].")
+            if isinstance(blocks, (str, int, float)):
+                blocks = [blocks]
+
+            observed_num = pd.to_numeric(df[block_col], errors="coerce")
+            wanted_num = pd.to_numeric(pd.Series(blocks), errors="coerce")
+            if wanted_num.notna().all():
+                mask = observed_num.isin(wanted_num.astype(float).tolist())
+            else:
+                wanted = {str(block).strip() for block in blocks}
+                mask = df[block_col].astype("string").str.strip().isin(wanted)
+
+            removed = int(mask.sum())
+            df = df.loc[~mask].copy()
+            print(f"🧹 Removed {removed} rows from {file} where {block_col} is in {list(blocks)}")
+            continue
+
         raise ValueError(f"Unknown session edit action for {file}: {action}")
 
     if len(df) != original_rows:
@@ -268,6 +296,30 @@ def _apply_rt_value_rules(merged_df, rt_value_edits):
                 animals = [animals]
             wanted = {str(animal).strip() for animal in animals}
             mask &= out["animal"].astype("string").str.strip().isin(wanted)
+
+        if "source_file" in rule and "source_file" in out.columns:
+            source_files = rule["source_file"]
+            if isinstance(source_files, str):
+                source_files = [source_files]
+            wanted = {_normalize_source_label(source_file) for source_file in source_files}
+            mask &= out["source_file"].astype("string").map(_normalize_source_label).isin(wanted)
+
+        if "block" in rule or "blocks" in rule:
+            block_col = rule.get("block_col", "block")
+            if block_col not in out.columns:
+                raise KeyError(f"RT value edit cannot be applied; missing block column: {block_col}")
+
+            blocks = rule.get("block", rule.get("blocks"))
+            if isinstance(blocks, (str, int, float)):
+                blocks = [blocks]
+
+            observed_num = pd.to_numeric(out[block_col], errors="coerce")
+            wanted_num = pd.to_numeric(pd.Series(blocks), errors="coerce")
+            if wanted_num.notna().all():
+                mask &= observed_num.isin(wanted_num.astype(float).tolist())
+            else:
+                wanted = {str(block).strip() for block in blocks}
+                mask &= out[block_col].astype("string").str.strip().isin(wanted)
 
         affected = int(mask.sum())
         out.loc[mask, "rt_value_valid"] = False
