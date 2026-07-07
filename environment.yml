@@ -13,6 +13,8 @@ dependencies:
   - r-base
   - r-lme4
   - r-lmertest
+  - r-glmmtmb
+  - r-reformulas>=0.4.3.1
   - polars
   - rpy2
   - bambi

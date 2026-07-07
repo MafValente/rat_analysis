@@ -1,6 +1,7 @@
 DataFiles/
 DataFiles/
 GroupComparison/_cache/
+.matplotlib/
 .ipynb_checkpoints/
 outputs/
 __pycache__/

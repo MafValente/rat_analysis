@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
+from scipy.optimize import minimize
 
 import Helpers.DataHelpers as DataHelpers
 import Psychometric
@@ -28,6 +29,7 @@ from GroupComparison.prepare import (
 BIASED_SESSION_TYPES = (3, 23)
 UNBIASED_RT_SESSION_TYPES = (1, 2)
 SHORT_DURATION_VALUE = 0
+PSYCHOMETRIC_L2 = 0.0
 BLOCK_ORDER = ["unbiased", "rightward", "leftward"]
 BLOCK_COLORS = {
     "unbiased": "#4D4D4D",
@@ -69,6 +71,267 @@ def default_filter_config() -> FilterConfig:
 
 def default_style() -> PlotStyle:
     return PlotStyle(title_fs=24, label_fs=25, tick_fs=24, legend_fs=16)
+
+
+def _psychometric_prior() -> np.ndarray:
+    return np.asarray([1.0, 0.0, 0.05, 0.95], dtype=float)
+
+
+def _psychometric_scale() -> np.ndarray:
+    return np.asarray([2.0, 10.0, 0.20, 0.20], dtype=float)
+
+
+def _fit_psychometric_biased(
+    x_data,
+    y_data,
+    *,
+    n_trials=None,
+    l2_strength: float = PSYCHOMETRIC_L2,
+):
+    x_data = np.asarray(x_data, dtype=float)
+    y_data = np.asarray(y_data, dtype=float)
+    finite = np.isfinite(x_data) & np.isfinite(y_data)
+    x_data = x_data[finite]
+    y_data = y_data[finite]
+    if x_data.size < 4:
+        raise ValueError("Need at least 4 finite ILD points for psychometric fit.")
+
+    if n_trials is None:
+        n_trials = np.full(x_data.shape, 50.0, dtype=float)
+    else:
+        n_trials = np.asarray(n_trials, dtype=float)[finite]
+        n_trials = np.clip(n_trials, 1.0, None)
+
+    lower_bounds = np.asarray([0.1, float(np.min(x_data)), 0.0, 0.5], dtype=float)
+    upper_bounds = np.asarray([10.0, float(np.max(x_data)), 0.5, 1.0], dtype=float)
+    prior = np.clip(_psychometric_prior(), lower_bounds, upper_bounds)
+    scale = _psychometric_scale()
+
+    if float(l2_strength) <= 0:
+        return Psychometric.fit_and_plot_psychometric(
+            x_data,
+            y_data,
+            model="my_psycho",
+            n_trials=n_trials.astype(int),
+            show_plot=False,
+        )
+
+    def objective(pars):
+        pred = Psychometric.my_psycho_model(x_data, *pars)
+        resid = pred - y_data
+        data_term = np.sum(n_trials * resid * resid)
+        penalty = float(l2_strength) * np.sum(((pars - prior) / scale) ** 2)
+        return float(data_term + penalty)
+
+    result = minimize(
+        objective,
+        x0=prior,
+        method="L-BFGS-B",
+        bounds=list(zip(lower_bounds, upper_bounds)),
+    )
+    pars = np.asarray(result.x if result.success else prior, dtype=float)
+    xx = np.linspace(float(np.min(x_data)), float(np.max(x_data)), 200)
+    yy = Psychometric.my_psycho_model(xx, *pars)
+    return pars, np.nan, xx, yy
+
+
+def _compute_psychometrics_by_ABL_local(
+    df_last: pd.DataFrame,
+    *,
+    l2_strength: float = PSYCHOMETRIC_L2,
+    min_ilds_for_fit: int = 4,
+) -> dict[int, dict[str, Any]]:
+    results: dict[int, dict[str, Any]] = {}
+    for abl in sorted(df_last["ABL"].dropna().unique()):
+        df_sub = df_last[df_last["ABL"] == abl]
+        ilds = np.sort(pd.to_numeric(df_sub["ILD"], errors="coerce").dropna().unique())
+        if len(ilds) == 0:
+            continue
+        prop_left = np.array([
+            (((df_sub["ILD"] == ild) & (pd.to_numeric(df_sub["success"], errors="coerce") == 1)).sum()) /
+            max(1, (((df_sub["ILD"] == ild) & (pd.to_numeric(df_sub["success"], errors="coerce") != 0)).sum()))
+            for ild in ilds
+        ], dtype=float)
+        prop_left = np.where(ilds < 0, 1 - prop_left, prop_left)
+        n_trials = np.array([(df_sub["ILD"] == ild).sum() for ild in ilds], dtype=int)
+        pars, L, xx, yy = None, np.nan, None, None
+        if len(ilds) >= min_ilds_for_fit and np.isfinite(prop_left).all():
+            try:
+                pars, L, xx, yy = _fit_psychometric_biased(
+                    ilds,
+                    prop_left,
+                    n_trials=n_trials,
+                    l2_strength=l2_strength,
+                )
+            except Exception:
+                pars, L, xx, yy = None, np.nan, None, None
+        results[int(abl)] = {
+            "ILDs": ilds,
+            "PropLeft": prop_left,
+            "n_trials": n_trials,
+            "pars": pars,
+            "L": L,
+            "xx": xx,
+            "yy": yy,
+        }
+    return results
+
+
+def _prep_psy_local(
+    df_in: pd.DataFrame,
+    do_individual_fits: bool,
+    *,
+    aggregation: str = "animal_trials",
+    skip_jnd_abl: int = 50,
+    l2_strength: float = PSYCHOMETRIC_L2,
+):
+    all_pts: list[dict[str, Any]] = []
+    param_rows: list[dict[str, Any]] = []
+    per_subject_curves: dict[tuple, dict[str, Any]] = {}
+    jnd_rows: list[dict[str, Any]] = []
+    valid_aggregations = {"animal_trials", "session_then_animal"}
+    if aggregation not in valid_aggregations:
+        raise ValueError(f"aggregation must be one of {sorted(valid_aggregations)}")
+
+    for subject, df_subj in df_in.groupby("animal", sort=False):
+        if aggregation == "session_then_animal" and "session" in df_subj.columns:
+            session_rows: list[dict[str, Any]] = []
+            for _, df_sess in df_subj.groupby("session", sort=False):
+                results = _compute_psychometrics_by_ABL_local(df_sess, l2_strength=l2_strength)
+                for abl, res in results.items():
+                    for ild, val in zip(np.asarray(res["ILDs"]), np.asarray(res["PropLeft"], dtype=float)):
+                        session_rows.append(
+                            {
+                                "subject": subject,
+                                "session": df_sess["session"].iloc[0] if "session" in df_sess.columns and not df_sess.empty else pd.NA,
+                                "ABL": int(abl),
+                                "ILD": float(ild),
+                                "PropLeft": float(val),
+                            }
+                        )
+            if session_rows:
+                session_points = pd.DataFrame(session_rows)
+                session_points["ABL"] = pd.to_numeric(session_points["ABL"], errors="coerce")
+                session_points["ILD"] = pd.to_numeric(session_points["ILD"], errors="coerce")
+                session_points["PropLeft"] = pd.to_numeric(session_points["PropLeft"], errors="coerce")
+                session_points = session_points.dropna(subset=["ABL", "ILD", "PropLeft"]).copy()
+                session_points["ABL"] = session_points["ABL"].astype(int)
+                subj_points = (
+                    session_points.groupby(["subject", "ABL", "ILD"])["PropLeft"]
+                    .agg(mean="mean", sem=sem, n="count")
+                    .reset_index()
+                )
+            else:
+                subj_points = pd.DataFrame(columns=["subject", "ABL", "ILD", "mean", "sem", "n"])
+
+            results = {}
+            for abl, df_abl in subj_points.groupby("ABL", sort=False):
+                df_abl = df_abl.sort_values("ILD")
+                ilds = df_abl["ILD"].to_numpy(dtype=float)
+                mean_vals = df_abl["mean"].to_numpy(dtype=float)
+                n_trials = np.full_like(ilds, 50)
+                pars, L, xx, yy = None, np.nan, None, None
+                if len(ilds) >= 4 and np.isfinite(mean_vals).all():
+                    try:
+                        pars, L, xx, yy = _fit_psychometric_biased(
+                            ilds,
+                            mean_vals,
+                            n_trials=n_trials,
+                            l2_strength=l2_strength,
+                        )
+                    except Exception:
+                        pars, L, xx, yy = None, np.nan, None, None
+                results[int(abl)] = {
+                    "ILDs": ilds,
+                    "PropLeft": mean_vals,
+                    "n_trials": n_trials,
+                    "pars": pars,
+                    "L": L,
+                    "xx": xx,
+                    "yy": yy,
+                }
+        else:
+            results = _compute_psychometrics_by_ABL_local(df_subj, l2_strength=l2_strength)
+
+        jnd_df = DataHelpers.compute_jnd_by_ABL(results, skip_ABL=skip_jnd_abl)
+        if jnd_df is not None and not jnd_df.empty:
+            for _, r in jnd_df.iterrows():
+                jnd_rows.append({"subject": subject, "ABL": int(r["ABL"]), "JND": float(r["JND"])})
+
+        if aggregation == "session_then_animal":
+            for _, row in subj_points.iterrows():
+                all_pts.append(
+                    {
+                        "subject": subject,
+                        "ABL": int(row["ABL"]),
+                        "ILD": float(row["ILD"]),
+                        "PropLeft": float(row["mean"]),
+                    }
+                )
+        else:
+            for abl, res in results.items():
+                for ild, val in zip(np.asarray(res["ILDs"]), np.asarray(res["PropLeft"], dtype=float)):
+                    all_pts.append({"subject": subject, "ABL": int(abl), "ILD": float(ild), "PropLeft": float(val)})
+
+        if do_individual_fits:
+            for abl, res in results.items():
+                if res.get("xx") is not None and res.get("yy") is not None:
+                    per_subject_curves[(subject, int(abl))] = dict(xx=res["xx"], yy=res["yy"])
+
+        for abl, res in results.items():
+            pars = res.get("pars")
+            if pars is None or len(pars) < 4 or not np.all(np.isfinite(np.asarray(pars[:4], dtype=float))):
+                continue
+            param_rows.append(
+                {
+                    "animal": subject,
+                    "line": df_subj["line"].iloc[0] if "line" in df_subj.columns and not df_subj.empty else pd.NA,
+                    "cohort": df_subj["cohort"].iloc[0] if "cohort" in df_subj.columns and not df_subj.empty else pd.NA,
+                    "genotype": df_subj["genotype"].iloc[0] if "genotype" in df_subj.columns and not df_subj.empty else pd.NA,
+                    "dataset_key": df_subj["dataset_key"].iloc[0] if "dataset_key" in df_subj.columns and not df_subj.empty else pd.NA,
+                    "ABL": int(abl),
+                    "slope_a": float(pars[0]),
+                    "bias_b": float(pars[1]),
+                    "lower_c": float(pars[2]),
+                    "upper_d": float(pars[3]),
+                }
+            )
+
+    points = pd.DataFrame(all_pts, columns=["subject", "ABL", "ILD", "PropLeft"])
+    jnd_indiv = pd.DataFrame(jnd_rows, columns=["subject", "ABL", "JND"])
+    params = pd.DataFrame(
+        param_rows,
+        columns=["animal", "line", "cohort", "genotype", "dataset_key", "ABL", "slope_a", "bias_b", "lower_c", "upper_d"],
+    )
+    if points.empty:
+        psy_group = pd.DataFrame(columns=["ABL", "ILD", "mean", "sem", "n"])
+        return points, psy_group, per_subject_curves, {}, jnd_indiv, params
+
+    psy_group = (
+        points.groupby(["ABL", "ILD"])["PropLeft"]
+        .agg(mean="mean", sem=sem, n="count")
+        .reset_index()
+    )
+    mean_fits: dict[int, dict[str, Any] | None] = {}
+    for abl in sorted(psy_group["ABL"].unique()):
+        sub = psy_group[psy_group["ABL"] == abl]
+        ilds = sub["ILD"].to_numpy(dtype=float)
+        y = sub["mean"].to_numpy(dtype=float)
+        if len(ilds) < 4 or not np.isfinite(y).all():
+            mean_fits[int(abl)] = None
+            continue
+        n_trials = np.full_like(ilds, 50)
+        try:
+            _, _, xx, yy = _fit_psychometric_biased(
+                ilds,
+                y,
+                n_trials=n_trials,
+                l2_strength=l2_strength,
+            )
+            mean_fits[int(abl)] = dict(xx=xx, yy=yy)
+        except Exception:
+            mean_fits[int(abl)] = None
+    return points, psy_group, per_subject_curves, mean_fits, jnd_indiv, params
 
 
 def _numeric_col(df: pd.DataFrame, col: str, default=np.nan) -> pd.Series:
@@ -175,6 +438,7 @@ def prepare_biased_blocks(
     rightward_ild_sign: int = 1,
     min_direction_imbalance: float = 0.0,
     keep_only_animals_with_biased_sessions: bool = True,
+    psychometric_l2: float = PSYCHOMETRIC_L2,
 ) -> dict[str, Any]:
     cfg = cfg or default_config()
     fcfg = fcfg or default_filter_config()
@@ -230,6 +494,7 @@ def prepare_biased_blocks(
         "cfg": cfg,
         "fcfg": fcfg,
         "style": style,
+        "psychometric_l2": float(psychometric_l2),
     }
 
 
@@ -252,6 +517,8 @@ def build_prepared_signed_rt(
     df: pd.DataFrame,
     selected_views: list[ViewSpec],
     cfg: GroupComparisonConfig,
+    *,
+    psychometric_l2: float = PSYCHOMETRIC_L2,
 ) -> dict[str, dict[str, Any]]:
     prepared: dict[str, dict[str, Any]] = {}
     for view in selected_views:
@@ -259,12 +526,21 @@ def build_prepared_signed_rt(
         rt_per_subj, rt_group = prep_rt_signed(df_v)
         mt_per_subj, mt_group = prep_mt(df_v)
         with contextlib.redirect_stdout(io.StringIO()):
-            psy_points, psy_group, psy_indiv, psy_mean, jnd_indiv, psy_params = prep_psy(
-                df_v,
-                do_individual_fits=(cfg.error_mode == "individuals"),
-                aggregation=cfg.psychometric_aggregation,
-                skip_jnd_abl=50,
-            )
+            if float(psychometric_l2) > 0:
+                psy_points, psy_group, psy_indiv, psy_mean, jnd_indiv, psy_params = _prep_psy_local(
+                    df_v,
+                    do_individual_fits=(cfg.error_mode == "individuals"),
+                    aggregation=cfg.psychometric_aggregation,
+                    skip_jnd_abl=50,
+                    l2_strength=psychometric_l2,
+                )
+            else:
+                psy_points, psy_group, psy_indiv, psy_mean, jnd_indiv, psy_params = prep_psy(
+                    df_v,
+                    do_individual_fits=(cfg.error_mode == "individuals"),
+                    aggregation=cfg.psychometric_aggregation,
+                    skip_jnd_abl=50,
+                )
         prepared[view.name] = dict(
             rt_per_subj=rt_per_subj,
             rt_group=rt_group,
@@ -384,6 +660,7 @@ def plot_genotype_block_figures(
     df_blocks = bundle["df_blocks"]
     cfg = bundle["cfg"]
     style = bundle["style"]
+    psychometric_l2 = float(bundle.get("psychometric_l2", PSYCHOMETRIC_L2))
     views = views or bundle["views"]
 
     outputs = {}
@@ -392,7 +669,7 @@ def plot_genotype_block_figures(
         if df_view.empty:
             continue
         block_views = make_block_views(df_view)
-        prepared = build_prepared_signed_rt(df_view, block_views, cfg)
+        prepared = build_prepared_signed_rt(df_view, block_views, cfg, psychometric_l2=psychometric_l2)
         jnd_indiv = compute_jnd_individuals_by_view(prepared, skip_abl=50)
         group_jnd = compute_group_jnd_by_view(jnd_indiv)
         block_names = [v.name for v in block_views]
@@ -427,6 +704,7 @@ def plot_animal_block_figures(
     df_blocks = bundle["df_blocks"]
     cfg = bundle["cfg"]
     style = bundle["style"]
+    psychometric_l2 = float(bundle.get("psychometric_l2", PSYCHOMETRIC_L2))
 
     outputs = {}
     animals = sorted(df_blocks["animal"].dropna().astype(str).unique())
@@ -443,7 +721,7 @@ def plot_animal_block_figures(
             else ""
         )
         block_views = make_block_views(df_animal)
-        prepared = build_prepared_signed_rt(df_animal, block_views, cfg)
+        prepared = build_prepared_signed_rt(df_animal, block_views, cfg, psychometric_l2=psychometric_l2)
         jnd_indiv = compute_jnd_individuals_by_view(prepared, skip_abl=50)
         group_jnd = compute_group_jnd_by_view(jnd_indiv)
         block_names = [v.name for v in block_views]
@@ -481,6 +759,7 @@ def plot_block_condition_figures(
     df_blocks = bundle["df_blocks"]
     cfg = bundle["cfg"]
     style = bundle["style"]
+    psychometric_l2 = float(bundle.get("psychometric_l2", PSYCHOMETRIC_L2))
     views = views or bundle["views"]
     view_colors = view_colors or {}
     view_styles = view_styles or {}
@@ -494,7 +773,7 @@ def plot_block_condition_figures(
         if not condition_views:
             continue
 
-        prepared = build_prepared_signed_rt(df_condition, condition_views, cfg)
+        prepared = build_prepared_signed_rt(df_condition, condition_views, cfg, psychometric_l2=psychometric_l2)
         jnd_indiv = compute_jnd_individuals_by_view(prepared, skip_abl=50)
         group_jnd = compute_group_jnd_by_view(jnd_indiv)
         fig = _plot_prepared_abls(
@@ -527,6 +806,7 @@ def _collect_block_condition_params(
 ) -> pd.DataFrame:
     df_blocks = bundle["df_blocks"]
     cfg = bundle["cfg"]
+    psychometric_l2 = float(bundle.get("psychometric_l2", PSYCHOMETRIC_L2))
     rows = []
 
     for condition in block_conditions:
@@ -537,7 +817,7 @@ def _collect_block_condition_params(
         if not condition_views:
             continue
 
-        prepared = build_prepared_signed_rt(df_condition, condition_views, cfg)
+        prepared = build_prepared_signed_rt(df_condition, condition_views, cfg, psychometric_l2=psychometric_l2)
         for view in condition_views:
             params = prepared.get(view.name, {}).get("psy_params", pd.DataFrame()).copy()
             if params.empty:
@@ -1299,15 +1579,19 @@ def _duration_pair_colors() -> dict[str, str]:
     return {"8+16": "#1F77B4", "32+64": "#E69F00", "120+0": "#4D4D4D"}
 
 
-def _add_effective_slope(params: pd.DataFrame) -> pd.DataFrame:
+def _add_slope_metrics(params: pd.DataFrame) -> pd.DataFrame:
     out = params.copy()
     needed = {"slope_a", "lower_c", "upper_d"}
     if not needed.issubset(out.columns):
         return out
     slope_a = pd.to_numeric(out["slope_a"], errors="coerce")
+    bias_b = pd.to_numeric(out["bias_b"], errors="coerce") if "bias_b" in out.columns else pd.Series(np.nan, index=out.index)
     lower_c = pd.to_numeric(out["lower_c"], errors="coerce")
     upper_d = pd.to_numeric(out["upper_d"], errors="coerce")
     out["effective_slope"] = 0.5 * (upper_d - lower_c) * slope_a
+    exp_term = np.exp(2 * slope_a * bias_b)
+    denom = (1.0 + exp_term) ** 2
+    out["slope_at_0"] = (upper_d - lower_c) * (2.0 * slope_a) * exp_term / denom
     return out
 
 
@@ -1316,7 +1600,7 @@ def _find_suspicious_slope_cases(
     *,
     condition_col: str,
 ) -> pd.DataFrame:
-    metric_col = "effective_slope" if "effective_slope" in params.columns else "slope_a"
+    metric_col = "slope_at_0" if "slope_at_0" in params.columns else ("effective_slope" if "effective_slope" in params.columns else "slope_a")
     if params.empty or metric_col not in params.columns or condition_col not in params.columns:
         return pd.DataFrame(columns=[condition_col, "ABL"])
 
@@ -1383,16 +1667,26 @@ def _compute_psy_curve_for_subset(
     cfg: GroupComparisonConfig,
     robust_mean: bool = False,
     trim_frac: float = 0.2,
+    psychometric_l2: float = PSYCHOMETRIC_L2,
 ) -> dict[str, Any] | None:
     if df_sub.empty:
         return None
     with contextlib.redirect_stdout(io.StringIO()):
-        psy_points, psy_group, _, psy_mean, _, _ = prep_psy(
-            df_sub,
-            do_individual_fits=False,
-            aggregation=cfg.psychometric_aggregation,
-            skip_jnd_abl=50,
-        )
+        if float(psychometric_l2) > 0:
+            psy_points, psy_group, _, psy_mean, _, _ = _prep_psy_local(
+                df_sub,
+                do_individual_fits=False,
+                aggregation=cfg.psychometric_aggregation,
+                skip_jnd_abl=50,
+                l2_strength=psychometric_l2,
+            )
+        else:
+            psy_points, psy_group, _, psy_mean, _, _ = prep_psy(
+                df_sub,
+                do_individual_fits=False,
+                aggregation=cfg.psychometric_aggregation,
+                skip_jnd_abl=50,
+            )
     if psy_group.empty:
         return None
     if not robust_mean:
@@ -1443,12 +1737,11 @@ def _compute_psy_curve_for_subset(
         xx = yy = None
         if len(ilds) >= 4 and np.isfinite(mean_vals).all():
             try:
-                pars, L, xx, yy = Psychometric.fit_and_plot_psychometric(
+                pars, L, xx, yy = _fit_psychometric_biased(
                     ilds,
                     mean_vals,
-                    model="my_psycho",
                     n_trials=n_trials,
-                    show_plot=False,
+                    l2_strength=psychometric_l2,
                 )
             except Exception:
                 pars = None
@@ -1471,7 +1764,7 @@ def _compute_psy_curve_for_subset(
     }
 
 
-def _displayed_curve_slope(xx, yy) -> float | None:
+def _displayed_curve_slope_at_zero(xx, yy) -> float | None:
     if xx is None or yy is None:
         return None
     x = np.asarray(xx, dtype=float)
@@ -1481,11 +1774,8 @@ def _displayed_curve_slope(xx, yy) -> float | None:
     y = y[finite]
     if x.size < 3:
         return None
-    ymin = float(np.min(y))
-    ymax = float(np.max(y))
-    target = ymin + 0.5 * (ymax - ymin)
     dydx = np.gradient(y, x)
-    idx = int(np.argmin(np.abs(y - target)))
+    idx = int(np.argmin(np.abs(x - 0.0)))
     if idx < 0 or idx >= len(dydx) or not np.isfinite(dydx[idx]):
         return None
     return float(dydx[idx])
@@ -1497,6 +1787,7 @@ def _compute_group_curve_slopes(
     cfg: GroupComparisonConfig,
     condition_col: str,
     robust_mean: bool = False,
+    psychometric_l2: float = PSYCHOMETRIC_L2,
 ) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     if history_df.empty or condition_col not in history_df.columns:
@@ -1505,13 +1796,13 @@ def _compute_group_curve_slopes(
     for (condition_value, abl, duration_pair), sub in history_df.groupby(
         [condition_col, "ABL", "duration_pair"], dropna=False, sort=False
     ):
-        curve = _compute_psy_curve_for_subset(sub, cfg=cfg, robust_mean=robust_mean)
+        curve = _compute_psy_curve_for_subset(sub, cfg=cfg, robust_mean=robust_mean, psychometric_l2=psychometric_l2)
         if curve is None:
             continue
         fit = curve["psy_mean_fits"].get(int(abl)) if curve["psy_mean_fits"] is not None else None
         if fit is None:
             continue
-        shown_slope = _displayed_curve_slope(fit["xx"], fit["yy"])
+        shown_slope = _displayed_curve_slope_at_zero(fit["xx"], fit["yy"])
         if shown_slope is None:
             continue
         rows.append(
@@ -1622,6 +1913,7 @@ def _plot_suspicious_psychometric_cases(
     title_prefix: str,
     condition_col: str,
     condition_label: str,
+    psychometric_l2: float = PSYCHOMETRIC_L2,
 ) -> tuple[dict[str, plt.Figure], pd.DataFrame]:
     suspicious = _find_suspicious_slope_cases(params, condition_col=condition_col)
     if suspicious.empty:
@@ -1637,7 +1929,7 @@ def _plot_suspicious_psychometric_cases(
     for _, row in suspicious.iterrows():
         condition_value = row[condition_col]
         abl = int(row["ABL"])
-        metric_col = row["slope_metric"] if "slope_metric" in row and pd.notna(row["slope_metric"]) else ("effective_slope" if "effective_slope" in params.columns else "slope_a")
+        metric_col = row["slope_metric"] if "slope_metric" in row and pd.notna(row["slope_metric"]) else ("slope_at_0" if "slope_at_0" in params.columns else ("effective_slope" if "effective_slope" in params.columns else "slope_a"))
         fig, ax = plt.subplots(1, 1, figsize=(5.6, 4.8))
         plotted_any = False
         slope_pairs = []
@@ -1647,7 +1939,7 @@ def _plot_suspicious_psychometric_cases(
                 & (pd.to_numeric(history_df["ABL"], errors="coerce").eq(abl))
                 & (history_df["duration_pair"].astype(str) == duration_pair)
             ].copy()
-            curve = _compute_psy_curve_for_subset(sub, cfg=cfg)
+            curve = _compute_psy_curve_for_subset(sub, cfg=cfg, psychometric_l2=psychometric_l2)
             if curve is None:
                 continue
             slope_vals = pd.to_numeric(
@@ -1660,7 +1952,7 @@ def _plot_suspicious_psychometric_cases(
                 errors="coerce",
             ).dropna()
             if not slope_vals.empty:
-                slope_summary = float(np.median(slope_vals.to_numpy(dtype=float)))
+                slope_summary = float(slope_vals.mean())
                 slope_pairs.append((duration_pair, slope_summary))
                 slope_rows.append(
                     {
@@ -1670,7 +1962,7 @@ def _plot_suspicious_psychometric_cases(
                         "duration_pair": duration_pair,
                         "slope_metric": metric_col,
                         "slope_summary": slope_summary,
-                        "slope_summary_type": "median",
+                        "slope_summary_type": "mean",
                         "n_animals_with_slope": int(len(slope_vals)),
                         "used_trimmed_mean": pd.NA,
                     }
@@ -1679,7 +1971,7 @@ def _plot_suspicious_psychometric_cases(
             fit = curve["psy_mean_fits"].get(abl) if curve["psy_mean_fits"] is not None else None
             color = duration_colors.get(duration_pair, "0.4")
             marker = duration_markers.get(duration_pair, "o")
-            shown_slope = _displayed_curve_slope(fit["xx"], fit["yy"]) if fit is not None else None
+            shown_slope = _displayed_curve_slope_at_zero(fit["xx"], fit["yy"]) if fit is not None else None
             ax.scatter(
                 DataHelpers.shift_ILD_for_ABL50(psy_group["ILD"]),
                 psy_group["mean"],
@@ -1744,14 +2036,14 @@ def _plot_suspicious_psychometric_cases(
                     errors="coerce",
                 ).dropna()
                 if not shown_vals.empty:
-                    lines.append(f"{name}: shown={shown_vals.iloc[0]:.3f}  median={value:.3f}")
+                    lines.append(f"{name}: shown={shown_vals.iloc[0]:.3f}  mean={value:.3f}")
                 else:
-                    lines.append(f"{name}: median={value:.3f}")
+                    lines.append(f"{name}: mean={value:.3f}")
             slope_text = "\n".join(lines)
             ax.text(
                 0.02,
                 0.98,
-                f"slope\n{slope_text}",
+                f"slope at 0\n{slope_text}",
                 transform=ax.transAxes,
                 ha="left",
                 va="top",
@@ -1760,7 +2052,7 @@ def _plot_suspicious_psychometric_cases(
             )
         for spine in ["right", "top"]:
             ax.spines[spine].set_visible(False)
-        fig.suptitle(f"{title_prefix} - slope check", fontsize=fs, y=0.98)
+        fig.suptitle(f"{title_prefix} - slope at 0 check", fontsize=fs, y=0.98)
         fig.tight_layout()
         figures[f"{condition_value}_ABL_{abl}"] = fig
 
@@ -1945,18 +2237,28 @@ def _compute_history_psy_params(
     history_df: pd.DataFrame,
     *,
     cfg: GroupComparisonConfig,
+    psychometric_l2: float = PSYCHOMETRIC_L2,
 ) -> pd.DataFrame:
     rows = []
     for (transition_type, duration_pair), sub in history_df.groupby(["transition_type", "duration_pair"], dropna=False, sort=False):
         if sub.empty:
             continue
         with contextlib.redirect_stdout(io.StringIO()):
-            _, _, _, _, jnd_indiv, psy_params = prep_psy(
-                sub,
-                do_individual_fits=True,
-                aggregation=cfg.psychometric_aggregation,
-                skip_jnd_abl=50,
-            )
+            if float(psychometric_l2) > 0:
+                _, _, _, _, jnd_indiv, psy_params = _prep_psy_local(
+                    sub,
+                    do_individual_fits=True,
+                    aggregation=cfg.psychometric_aggregation,
+                    skip_jnd_abl=50,
+                    l2_strength=psychometric_l2,
+                )
+            else:
+                _, _, _, _, jnd_indiv, psy_params = prep_psy(
+                    sub,
+                    do_individual_fits=True,
+                    aggregation=cfg.psychometric_aggregation,
+                    skip_jnd_abl=50,
+                )
         if not psy_params.empty:
             tmp = psy_params.copy()
             tmp["transition_type"] = transition_type
@@ -1973,7 +2275,7 @@ def _compute_history_psy_params(
     params = pd.concat([r for r in rows if "slope_a" in r.columns], ignore_index=True, sort=False) if any("slope_a" in r.columns for r in rows) else pd.DataFrame()
     if params.empty:
         return params
-    params = _add_effective_slope(params)
+    params = _add_slope_metrics(params)
 
     jnd_parts = [r for r in rows if "JND" in r.columns]
     if jnd_parts:
@@ -2006,7 +2308,7 @@ def _plot_history_psy_params(
     }
     specs = [
         ("bias_b", "Bias (b)"),
-        ("effective_slope", "Slope"),
+        ("slope_at_0", "Slope at 0"),
         ("JND", "JND"),
     ]
     fs = style.legend_fs
@@ -2015,7 +2317,7 @@ def _plot_history_psy_params(
     duration_offsets = _duration_pair_offsets(duration_order)
     duration_markers = _duration_pair_markers()
     global_ylims = _global_param_ylim(params, [col for col, _ in specs])
-    global_ylims.update(_full_param_ylim(params, ["effective_slope"]))
+    global_ylims.update(_full_param_ylim(params, ["slope_at_0"]))
 
     for abl in abls:
         abl_df = params[pd.to_numeric(params["ABL"], errors="coerce").eq(int(abl))].copy()
@@ -2048,16 +2350,12 @@ def _plot_history_psy_params(
                         color=color,
                         marker=marker,
                         alpha=0.75,
-                        edgecolors="black" if col == "effective_slope" else "none",
-                        linewidths=0.25 if col == "effective_slope" else 0.0,
+                        edgecolors="black" if col == "slope_at_0" else "none",
+                        linewidths=0.25 if col == "slope_at_0" else 0.0,
                         zorder=3,
                     )
-                    if col == "effective_slope":
-                        mean, lower_err, upper_err = _median_and_iqr_errors(sub[col].to_numpy(dtype=float))
-                        err = np.asarray([[lower_err], [upper_err]], dtype=float)
-                    else:
-                        mean = float(sub[col].mean())
-                        err = sem(sub[col].to_numpy(dtype=float))
+                    mean = float(sub[col].mean())
+                    err = sem(sub[col].to_numpy(dtype=float))
                     ax.errorbar(
                         x0,
                         mean,
@@ -2272,18 +2570,28 @@ def _compute_current_block_psy_params(
     history_df: pd.DataFrame,
     *,
     cfg: GroupComparisonConfig,
+    psychometric_l2: float = PSYCHOMETRIC_L2,
 ) -> pd.DataFrame:
     rows = []
     for (block_name, duration_pair), sub in history_df.groupby(["current_block_condition", "duration_pair"], dropna=False, sort=False):
         if sub.empty:
             continue
         with contextlib.redirect_stdout(io.StringIO()):
-            _, _, _, _, jnd_indiv, psy_params = prep_psy(
-                sub,
-                do_individual_fits=True,
-                aggregation=cfg.psychometric_aggregation,
-                skip_jnd_abl=50,
-            )
+            if float(psychometric_l2) > 0:
+                _, _, _, _, jnd_indiv, psy_params = _prep_psy_local(
+                    sub,
+                    do_individual_fits=True,
+                    aggregation=cfg.psychometric_aggregation,
+                    skip_jnd_abl=50,
+                    l2_strength=psychometric_l2,
+                )
+            else:
+                _, _, _, _, jnd_indiv, psy_params = prep_psy(
+                    sub,
+                    do_individual_fits=True,
+                    aggregation=cfg.psychometric_aggregation,
+                    skip_jnd_abl=50,
+                )
         if not psy_params.empty:
             tmp = psy_params.copy()
             tmp["current_block_condition"] = block_name
@@ -2300,7 +2608,7 @@ def _compute_current_block_psy_params(
     params = pd.concat([r for r in rows if "slope_a" in r.columns], ignore_index=True, sort=False) if any("slope_a" in r.columns for r in rows) else pd.DataFrame()
     if params.empty:
         return params
-    params = _add_effective_slope(params)
+    params = _add_slope_metrics(params)
 
     jnd_parts = [r for r in rows if "JND" in r.columns]
     if jnd_parts:
@@ -2326,14 +2634,14 @@ def _plot_current_block_psy_params(
     if not duration_order:
         return {}
     colors = {"rightward": "#1F77B4", "leftward": "#D62728"}
-    specs = [("bias_b", "Bias (b)"), ("effective_slope", "Slope"), ("JND", "JND")]
+    specs = [("bias_b", "Bias (b)"), ("slope_at_0", "Slope at 0"), ("JND", "JND")]
     fs = style.legend_fs
     figs = {}
     rng = np.random.default_rng(3)
     duration_offsets = _duration_pair_offsets(duration_order)
     duration_markers = _duration_pair_markers()
     global_ylims = _global_param_ylim(params, [col for col, _ in specs])
-    global_ylims.update(_full_param_ylim(params, ["effective_slope"]))
+    global_ylims.update(_full_param_ylim(params, ["slope_at_0"]))
 
     for abl in abls:
         abl_df = params[pd.to_numeric(params["ABL"], errors="coerce").eq(int(abl))].copy()
@@ -2366,16 +2674,12 @@ def _plot_current_block_psy_params(
                         color=color,
                         marker=marker,
                         alpha=0.75,
-                        edgecolors="black" if col == "effective_slope" else "none",
-                        linewidths=0.25 if col == "effective_slope" else 0.0,
+                        edgecolors="black" if col == "slope_at_0" else "none",
+                        linewidths=0.25 if col == "slope_at_0" else 0.0,
                         zorder=3,
                     )
-                    if col == "effective_slope":
-                        mean, lower_err, upper_err = _median_and_iqr_errors(sub[col].to_numpy(dtype=float))
-                        err = np.asarray([[lower_err], [upper_err]], dtype=float)
-                    else:
-                        mean = float(sub[col].mean())
-                        err = sem(sub[col].to_numpy(dtype=float))
+                    mean = float(sub[col].mean())
+                    err = sem(sub[col].to_numpy(dtype=float))
                     ax.errorbar(
                         x0,
                         mean,
@@ -2508,6 +2812,7 @@ def plot_block_history_exploration(
     df_blocks = bundle["df_blocks"]
     style = bundle["style"]
     cfg = bundle["cfg"]
+    psychometric_l2 = float(bundle.get("psychometric_l2", PSYCHOMETRIC_L2))
     views = views or bundle["views"]
     outputs = {}
 
@@ -2523,7 +2828,7 @@ def plot_block_history_exploration(
             style=style,
             abls=abls,
         )
-        params = _compute_history_psy_params(history_df, cfg=cfg)
+        params = _compute_history_psy_params(history_df, cfg=cfg, psychometric_l2=psychometric_l2)
         param_figs = _plot_history_psy_params(
             params,
             title_prefix=f"{view.name} - psychometric summary by previous/current block",
@@ -2538,6 +2843,7 @@ def plot_block_history_exploration(
             title_prefix=f"{view.name} - previous/current psychometrics",
             condition_col="transition_type",
             condition_label="Transition",
+            psychometric_l2=psychometric_l2,
         )
         phase_fig = _plot_history_early_late(
             history_df,
@@ -2553,7 +2859,7 @@ def plot_block_history_exploration(
             style=style,
             abls=abls,
         )
-        current_params = _compute_current_block_psy_params(history_df, cfg=cfg)
+        current_params = _compute_current_block_psy_params(history_df, cfg=cfg, psychometric_l2=psychometric_l2)
         current_param_figs = _plot_current_block_psy_params(
             current_params,
             title_prefix=f"{view.name} - psychometric summary by current block",
@@ -2568,6 +2874,7 @@ def plot_block_history_exploration(
             title_prefix=f"{view.name} - current-block psychometrics",
             condition_col="current_block_condition",
             condition_label="Current block",
+            psychometric_l2=psychometric_l2,
         )
         current_phase_fig = _plot_current_block_early_late(
             history_df,

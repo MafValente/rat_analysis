@@ -1,11 +1,20 @@
 #%%
+import os
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+os.environ.setdefault("MPLCONFIGDIR", str(SCRIPT_DIR / ".matplotlib"))
+conda_r_home = Path(os.environ.get("CONDA_PREFIX", "")) / "lib" / "R"
+if conda_r_home.is_dir():
+    os.environ["R_HOME"] = str(conda_r_home)
+os.environ.setdefault("RPY2_CFFI_MODE", "ABI")
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import zscore
 import Helpers.DataHelpers as DataHelpers
-import os
 
 # --- R + rpy2 imports ---
 import rpy2.robjects as ro
@@ -29,16 +38,19 @@ print("✅ Loaded R packages: lme4, stats, MuMIn")
 LINE = "CNTNAP2"   # or "SHANK3"
 COHORT = "cohort2" # or "cohort1", etc
 
-BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+BASE_DATA_DIR = SCRIPT_DIR / "DataFiles"
 
 LINE_ROOTS = {
      ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
      ("SHANK3", "cohort1"): "SHANK3_cohort1",
  }
 
-DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
-
-os.chdir(DATA_DIR)
+DATA_DIR = BASE_DATA_DIR / LINE_ROOTS[LINE, COHORT]
+if not DATA_DIR.is_dir():
+    raise FileNotFoundError(
+        f"Expected data directory does not exist: {DATA_DIR}. "
+        "Check LINE/COHORT or BASE_DATA_DIR."
+    )
 
 #%%
 # =======================
@@ -47,7 +59,7 @@ os.chdir(DATA_DIR)
 
 print("📂 Loading and preprocessing data...")
 
-cohort_file = "merged_all_subjects.csv"
+cohort_file = DATA_DIR / "merged_all_subjects.csv"
 df = pd.read_csv(cohort_file)
 
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
@@ -331,7 +343,7 @@ for ktype, df_group in enumerate(out_type, start=1):
 # ==========================
 import pickle
 
-save_path = "glmm_results_cntnap2.pkl"   # choose any filename you like
+save_path = DATA_DIR / "glmm_results_cntnap2.pkl"   # choose any filename you like
 
 to_save = {
     "mdle_all": mdle_all,
@@ -555,7 +567,7 @@ print("✅ model_results built for WT, HET, HOM")
 
 #%%
 # Save also R² and model_results (optional)
-extra_save_path = "glmm_results_cntnap2_full.pkl"
+extra_save_path = DATA_DIR / "glmm_results_cntnap2_full.pkl"
 
 extra = {
     "mdle_all": mdle_all,
