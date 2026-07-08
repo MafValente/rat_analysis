@@ -12,7 +12,6 @@ from GLM_rats_ASDcohort2_glmmTMB import (
     BASE_DATA_DIR,
     LINE,
     COHORT,
-    LINE_ROOTS,
     add_model_predictors,
     dataset_key,
     import_r_backend,
@@ -26,6 +25,7 @@ from GLM_rats_ASDcohort2_glmmTMB import (
     qualify_dataset_ids,
     qualify_group_info,
     resolve_dataset_filters,
+    resolve_dataset_dir,
 )
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -67,6 +67,14 @@ def parse_args():
     )
     parser.add_argument("--rt-session-type", type=int, default=1)
     parser.add_argument("--stim-dur-ms", type=int, default=6000)
+    parser.add_argument(
+        "--session-types-first-block-only",
+        default="3,23",
+        help=(
+            "Comma-separated session_type values for which only the first block of each session "
+            "should be kept. Use an empty string to disable. Default: 3,23."
+        ),
+    )
     parser.add_argument("--min-session", type=int, default=None)
     parser.add_argument(
         "--dataset-filter-overrides",
@@ -142,9 +150,7 @@ def main():
     group_info_lists = []
     dataset_filter_summary = {}
     for line, cohort in dataset_selections:
-        data_dir = os.path.join(base_data_dir, LINE_ROOTS[(line, cohort)])
-        if not os.path.isdir(data_dir):
-            raise FileNotFoundError(f"Expected data directory does not exist: {data_dir}")
+        data_dir = resolve_dataset_dir(base_data_dir, line, cohort)
         dataset_filters = resolve_dataset_filters(args, line, cohort, filter_overrides)
         dataset_filter_summary[dataset_key(line, cohort)] = dataset_filters
         out_one, cohort_file = load_and_prepare_data(

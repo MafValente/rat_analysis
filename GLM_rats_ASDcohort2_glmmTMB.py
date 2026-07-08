@@ -30,8 +30,10 @@ COHORT = "cohort2" # or "cohort1", etc
 
 BASE_DATA_DIR = str(SCRIPT_DIR / "DataFiles")
 
-LINE_ROOTS = {
+DATASET_DIR_ALIASES = {
+     ("CNTNAP2", "cohort1"): "CNTNAP2_cohort1",
      ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
      ("CNTNAP2", "cohort4"): "CNTNAP2_cohort4",
      ("SHANK3", "cohort1"): "SHANK3_cohort1",
  }
@@ -57,6 +59,7 @@ SUBJECT_METADATA_FILES = [
     "metadata.csv",
 ]
 SUBJECT_COLUMN_CANDIDATES = ["subject", "animal", "animal_id", "subject_id", "rat", "rat_id"]
+BLOCK_COLUMN_CANDIDATES = ["block", "Block", "block_num", "block_number", "trial_block"]
 
 
 def parse_args():
@@ -71,7 +74,6 @@ def parse_args():
     parser.add_argument(
         "--line",
         default=LINE,
-        choices=sorted({key[0] for key in LINE_ROOTS}),
         help=f"Genetic line to analyze. Default: {LINE}.",
     )
     parser.add_argument(
@@ -132,6 +134,14 @@ def parse_args():
         help="Stimulus duration in ms used by the RT/stimulus-duration filter. Default: 6000.",
     )
     parser.add_argument(
+        "--session-types-first-block-only",
+        default="3,23",
+        help=(
+            "Comma-separated session_type values for which only the first block of each session "
+            "should be kept. Use an empty string to disable. Default: 3,23."
+        ),
+    )
+    parser.add_argument(
         "--min-session",
         type=int,
         default=None,
@@ -161,6 +171,40 @@ def dataset_key(line, cohort):
     return f"{line}:{cohort}"
 
 
+def parse_int_set(values):
+    if values is None:
+        return []
+    if isinstance(values, (list, tuple, set)):
+        out = []
+        for value in values:
+            if value is None or str(value).strip() == "":
+                continue
+            out.append(int(str(value).strip()))
+        return sorted(set(out))
+    text = str(values).strip()
+    if not text:
+        return []
+    return sorted({int(part.strip()) for part in text.split(",") if part.strip()})
+
+
+def resolve_dataset_root_name(line, cohort):
+    return DATASET_DIR_ALIASES.get((line, cohort), f"{line}_{cohort}")
+
+
+def resolve_dataset_dir(base_data_dir, line, cohort):
+    data_dir = os.path.join(base_data_dir, resolve_dataset_root_name(line, cohort))
+    if os.path.isdir(data_dir):
+        return data_dir
+    valid_dirs = sorted(
+        entry.name for entry in Path(base_data_dir).iterdir()
+        if entry.is_dir() and entry.name != "Old Data"
+    )
+    raise FileNotFoundError(
+        f"Expected data directory does not exist for {line}:{cohort}: {data_dir}. "
+        f"Available dataset folders under {base_data_dir}: {valid_dirs}"
+    )
+
+
 def parse_dataset_selections(value):
     selections = []
     for part in value.split(","):
@@ -172,11 +216,6 @@ def parse_dataset_selections(value):
                 f"Invalid dataset selection '{item}'. Use LINE:COHORT, e.g. CNTNAP2:cohort2."
             )
         line, cohort = [piece.strip() for piece in item.split(":", 1)]
-        if (line, cohort) not in LINE_ROOTS:
-            raise ValueError(
-                f"Unknown dataset selection {line}:{cohort}. "
-                f"Valid combinations: {', '.join(dataset_key(*key) for key in LINE_ROOTS)}."
-            )
         selections.append((line, cohort))
     if not selections:
         raise ValueError("No valid dataset selections were provided.")
@@ -506,6 +545,7 @@ def resolve_dataset_filters(args, line, cohort, overrides):
         "apply_rt_stim_filter": args.apply_rt_stim_filter,
         "rt_session_type": args.rt_session_type,
         "stim_dur_ms": args.stim_dur_ms,
+        "session_types_first_block_only": parse_int_set(args.session_types_first_block_only),
         "min_session": args.min_session,
     }
     dataset_overrides = overrides.get(dataset_key(line, cohort), {})
@@ -514,6 +554,9 @@ def resolve_dataset_filters(args, line, cohort, overrides):
             f"Dataset filter override for {dataset_key(line, cohort)} must be a JSON object."
         )
     filters.update(dataset_overrides)
+    filters["session_types_first_block_only"] = parse_int_set(
+        filters.get("session_types_first_block_only")
+    )
     if filters["min_session"] is None:
         filters["min_session"] = default_min_session(line, cohort)
     return filters
@@ -525,6 +568,49 @@ def make_run_dir(base_dir, config):
     run_dir = os.path.join(base_dir, "runs_glmmTMB", run_id)
     os.makedirs(run_dir, exist_ok=False)
     return run_id, run_dir
+
+
+def keep_first_block_for_selected_session_types(df, session_types):
+    if not session_types:
+        return df
+
+    block_col = next((col for col in BLOCK_COLUMN_CANDIDATES if col in df.columns), None)
+    if block_col is None:
+        print(
+            "Skipping first-block-only filter because no block column was found. "
+            f"Checked: {BLOCK_COLUMN_CANDIDATES}"
+        )
+        return df
+
+    if "session" not in df.columns or "animal" not in df.columns or "session_type" not in df.columns:
+        print(
+            "Skipping first-block-only filter because one of animal/session/session_type is missing."
+        )
+        return df
+
+    out = df.copy()
+    out["_session_type_num"] = pd.to_numeric(out["session_type"], errors="coerce")
+    out["_block_num"] = pd.to_numeric(out[block_col], errors="coerce")
+
+    target_mask = out["_session_type_num"].isin(session_types)
+    if not target_mask.any():
+        out = out.drop(columns=["_session_type_num", "_block_num"])
+        return out
+
+    first_block = out.loc[target_mask].groupby(["animal", "session"], observed=True)["_block_num"].transform("min")
+    keep_mask = (~target_mask) | (
+        out["_block_num"].notna()
+        & first_block.notna()
+        & out["_block_num"].eq(first_block)
+    )
+    dropped = int((~keep_mask & target_mask).sum())
+    out = out.loc[keep_mask].copy()
+    out = out.drop(columns=["_session_type_num", "_block_num"])
+    print(
+        "Applied first-block-only filter for session types "
+        f"{session_types}: dropped {dropped} rows using block column '{block_col}'."
+    )
+    return out
 
 
 def load_and_prepare_data(data_dir, base_data_dir, filters, line, cohort):
@@ -560,6 +646,10 @@ def load_and_prepare_data(data_dir, base_data_dir, filters, line, cohort):
         sd = pd.to_numeric(df["stim_dur"], errors="coerce")
         df = df[(sess == filters["rt_session_type"]) | (sd == filters["stim_dur_ms"])].copy()
 
+    df = keep_first_block_for_selected_session_types(
+        df, filters["session_types_first_block_only"]
+    )
+
     min_session = filters["min_session"]
 
     print(f"Loaded file: {cohort_file} ({rows_start} rows before filtering)")
@@ -590,6 +680,7 @@ def load_and_prepare_data(data_dir, base_data_dir, filters, line, cohort):
         f"apply_rt_stim_filter={filters['apply_rt_stim_filter']}, "
         f"rt_session_type={filters['rt_session_type']}, "
         f"stim_dur_ms={filters['stim_dur_ms']}, "
+        f"session_types_first_block_only={filters['session_types_first_block_only']}, "
         f"min_session={min_session}"
     )
     print("Response coding: original -1/1 kept in Response_signed; Response recoded to 0/1.")
@@ -833,13 +924,7 @@ def main():
     all_group_info = []
     dataset_filter_summary = {}
     for line, cohort in dataset_selections:
-        data_dir = os.path.join(base_data_dir, LINE_ROOTS[line, cohort])
-        if not os.path.isdir(data_dir):
-            raise FileNotFoundError(
-                f"Expected data directory does not exist: {data_dir}. "
-                "Check --datasets, --line, --cohort, or --base-data-dir."
-            )
-
+        data_dir = resolve_dataset_dir(base_data_dir, line, cohort)
         dataset_filters = resolve_dataset_filters(args, line, cohort, filter_overrides)
         dataset_filter_summary[dataset_key(line, cohort)] = dataset_filters
         out_one, cohort_file = load_and_prepare_data(
@@ -902,7 +987,7 @@ def main():
         os.makedirs(run_base_dir, exist_ok=True)
     else:
         only_line, only_cohort = dataset_selections[0]
-        run_base_dir = os.path.join(base_data_dir, LINE_ROOTS[only_line, only_cohort])
+        run_base_dir = resolve_dataset_dir(base_data_dir, only_line, only_cohort)
 
     run_config = {
         "backend": "glmmTMB",
