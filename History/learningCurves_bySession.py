@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 
 # --- CONFIGURATION ---
 SUBJECT_COL = 'animal'

@@ -1,0 +1,119 @@
+Session-Type Daily File Changes
+Date: 2026-04-24
+
+SHANK3 cohort1 daily CSVs changed earlier
+- DataFiles/SHANK3_cohort1/ASD0038/out_ASD0038_260407.csv
+- DataFiles/SHANK3_cohort1/ASD0038/out_ASD0038_260408.csv
+- DataFiles/SHANK3_cohort1/ASD0038/out_ASD0038_260410.csv
+- DataFiles/SHANK3_cohort1/ASD0038/out_ASD0038_260413.csv
+- DataFiles/SHANK3_cohort1/ASD0038/out_ASD0038_260415.csv
+- DataFiles/SHANK3_cohort1/ASD0038/out_ASD0038_260416.csv
+- DataFiles/SHANK3_cohort1/ASD0041/out_ASD0041_260407.csv
+- DataFiles/SHANK3_cohort1/ASD0041/out_ASD0041_260408.csv
+- DataFiles/SHANK3_cohort1/ASD0041/out_ASD0041_260410.csv
+- DataFiles/SHANK3_cohort1/ASD0041/out_ASD0041_260413.csv
+- DataFiles/SHANK3_cohort1/ASD0041/out_ASD0041_260415.csv
+- DataFiles/SHANK3_cohort1/ASD0041/out_ASD0041_260416.csv
+- DataFiles/SHANK3_cohort1/ASD0042/out_ASD0042_260407.csv
+- DataFiles/SHANK3_cohort1/ASD0042/out_ASD0042_260408.csv
+- DataFiles/SHANK3_cohort1/ASD0042/out_ASD0042_260410.csv
+- DataFiles/SHANK3_cohort1/ASD0042/out_ASD0042_260413.csv
+- DataFiles/SHANK3_cohort1/ASD0042/out_ASD0042_260415.csv
+- DataFiles/SHANK3_cohort1/ASD0042/out_ASD0042_260416.csv
+- DataFiles/SHANK3_cohort1/ASD0043/out_ASD0043_260407.csv
+- DataFiles/SHANK3_cohort1/ASD0043/out_ASD0043_260408.csv
+- DataFiles/SHANK3_cohort1/ASD0043/out_ASD0043_260410.csv
+- DataFiles/SHANK3_cohort1/ASD0043/out_ASD0043_260413.csv
+- DataFiles/SHANK3_cohort1/ASD0043/out_ASD0043_260415.csv
+- DataFiles/SHANK3_cohort1/ASD0043/out_ASD0043_260416.csv
+- DataFiles/SHANK3_cohort1/ASD0047/out_ASD0047_260408.csv
+- DataFiles/SHANK3_cohort1/ASD0047/out_ASD0047_260410.csv
+- DataFiles/SHANK3_cohort1/ASD0047/out_ASD0047_260415.csv
+- DataFiles/SHANK3_cohort1/ASD0047/out_ASD0047_260416.csv
+
+CNTNAP2 cohort3 daily CSVs changed on 2026-04-24
+- DataFiles/CNTNAP2_cohort3/ASD0027/out_ASD0027_260416.csv
+- DataFiles/CNTNAP2_cohort3/ASD0034/out_ASD0034_260416.csv
+- DataFiles/CNTNAP2_cohort3/ASD0037/out_ASD0037_260416.csv
+
+Notes
+- Only daily CSVs are listed here.
+- ASD0023 and ASD0024 were intentionally excluded from the SHANK3 pass.
+- ASD0022 in CNTNAP2 cohort3 was checked and did not require changes.
+
+Second round changes applied on 2026-04-24 for RT-only files from 2026-04-17 to 2026-04-23
+
+SHANK3 cohort1 additional daily CSVs changed
+- DataFiles/SHANK3_cohort1/ASD0038/out_ASD0038_260417.csv
+- DataFiles/SHANK3_cohort1/ASD0038/out_ASD0038_260420.csv
+- DataFiles/SHANK3_cohort1/ASD0038/out_ASD0038_260421.csv
+- DataFiles/SHANK3_cohort1/ASD0038/out_ASD0038_260422.csv
+- DataFiles/SHANK3_cohort1/ASD0038/out_ASD0038_260423.csv
+- DataFiles/SHANK3_cohort1/ASD0041/out_ASD0041_260417.csv
+- DataFiles/SHANK3_cohort1/ASD0041/out_ASD0041_260420.csv
+- DataFiles/SHANK3_cohort1/ASD0041/out_ASD0041_260421.csv
+- DataFiles/SHANK3_cohort1/ASD0041/out_ASD0041_260422.csv
+- DataFiles/SHANK3_cohort1/ASD0041/out_ASD0041_260423.csv
+- DataFiles/SHANK3_cohort1/ASD0042/out_ASD0042_260417.csv
+- DataFiles/SHANK3_cohort1/ASD0042/out_ASD0042_260420.csv
+- DataFiles/SHANK3_cohort1/ASD0042/out_ASD0042_260421.csv
+- DataFiles/SHANK3_cohort1/ASD0042/out_ASD0042_260422.csv
+- DataFiles/SHANK3_cohort1/ASD0042/out_ASD0042_260423.csv
+- DataFiles/SHANK3_cohort1/ASD0043/out_ASD0043_260417.csv
+- DataFiles/SHANK3_cohort1/ASD0043/out_ASD0043_260420.csv
+- DataFiles/SHANK3_cohort1/ASD0043/out_ASD0043_260421.csv
+- DataFiles/SHANK3_cohort1/ASD0043/out_ASD0043_260422.csv
+- DataFiles/SHANK3_cohort1/ASD0043/out_ASD0043_260423.csv
+- DataFiles/SHANK3_cohort1/ASD0047/out_ASD0047_260417.csv
+- DataFiles/SHANK3_cohort1/ASD0047/out_ASD0047_260420.csv
+- DataFiles/SHANK3_cohort1/ASD0047/out_ASD0047_260421.csv
+- DataFiles/SHANK3_cohort1/ASD0047/out_ASD0047_260422.csv
+- DataFiles/SHANK3_cohort1/ASD0047/out_ASD0047_260423.csv
+
+CNTNAP2 cohort3 additional daily CSVs changed
+- DataFiles/CNTNAP2_cohort3/ASD0027/out_ASD0027_260417.csv
+- DataFiles/CNTNAP2_cohort3/ASD0027/out_ASD0027_260420.csv
+- DataFiles/CNTNAP2_cohort3/ASD0027/out_ASD0027_260421.csv
+- DataFiles/CNTNAP2_cohort3/ASD0027/out_ASD0027_260422.csv
+- DataFiles/CNTNAP2_cohort3/ASD0027/out_ASD0027_260423.csv
+- DataFiles/CNTNAP2_cohort3/ASD0034/out_ASD0034_260417.csv
+- DataFiles/CNTNAP2_cohort3/ASD0034/out_ASD0034_260420.csv
+- DataFiles/CNTNAP2_cohort3/ASD0034/out_ASD0034_260421.csv
+- DataFiles/CNTNAP2_cohort3/ASD0034/out_ASD0034_260423.csv
+- DataFiles/CNTNAP2_cohort3/ASD0037/out_ASD0037_260417.csv
+- DataFiles/CNTNAP2_cohort3/ASD0037/out_ASD0037_260420.csv
+- DataFiles/CNTNAP2_cohort3/ASD0037/out_ASD0037_260421.csv
+- DataFiles/CNTNAP2_cohort3/ASD0037/out_ASD0037_260422.csv
+- DataFiles/CNTNAP2_cohort3/ASD0037/out_ASD0037_260423.csv
+
+Third round changes applied on 2026-04-24 after expanding the scan to additional animals
+
+SHANK3 cohort1 additional daily CSVs changed
+- DataFiles/SHANK3_cohort1/ASD0039/out_ASD0039_260421.csv
+- DataFiles/SHANK3_cohort1/ASD0039/out_ASD0039_260422.csv
+- DataFiles/SHANK3_cohort1/ASD0039/out_ASD0039_260423.csv
+- DataFiles/SHANK3_cohort1/ASD0040/out_ASD0040_260421.csv
+- DataFiles/SHANK3_cohort1/ASD0040/out_ASD0040_260422.csv
+- DataFiles/SHANK3_cohort1/ASD0040/out_ASD0040_260423.csv
+
+CNTNAP2 cohort3 additional daily CSVs changed
+- DataFiles/CNTNAP2_cohort3/ASD0028/out_ASD0028_260421.csv
+- DataFiles/CNTNAP2_cohort3/ASD0028/out_ASD0028_260422.csv
+- DataFiles/CNTNAP2_cohort3/ASD0028/out_ASD0028_260423.csv
+- DataFiles/CNTNAP2_cohort3/ASD0031/out_ASD0031_260421.csv
+- DataFiles/CNTNAP2_cohort3/ASD0031/out_ASD0031_260422.csv
+- DataFiles/CNTNAP2_cohort3/ASD0031/out_ASD0031_260423.csv
+
+Fourth round changes applied on 2026-04-29 for files with real short durations but session_type 1
+
+CNTNAP2 cohort3 daily CSVs changed
+- DataFiles/CNTNAP2_cohort3/ASD0026/out_ASD0026_260424.csv
+- DataFiles/CNTNAP2_cohort3/ASD0026/out_ASD0026_260425.csv
+- DataFiles/CNTNAP2_cohort3/ASD0026/out_ASD0026_260427.csv
+- DataFiles/CNTNAP2_cohort3/ASD0026/out_ASD0026_260428.csv
+
+SHANK3 cohort1 daily CSVs changed
+- DataFiles/SHANK3_cohort1/ASD0045/out_ASD0045_260424.csv
+- DataFiles/SHANK3_cohort1/ASD0045/out_ASD0045_260425.csv
+- DataFiles/SHANK3_cohort1/ASD0045/out_ASD0045_260427.csv
+- DataFiles/SHANK3_cohort1/ASD0045/out_ASD0045_260428.csv

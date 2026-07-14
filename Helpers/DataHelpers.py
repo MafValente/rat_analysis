@@ -8,6 +8,7 @@ import Psychometric
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import norm
+from collections.abc import Mapping
 
 
 """
@@ -21,7 +22,7 @@ from scipy.stats import norm
 """
 def prepare_data(
     df,
-    training_level_filter=16,
+    #training_level_filter=16,
     session_col="session",   # <-- change to your real session column name
     trial_col="trial",       # <-- or trial_index if different
 ):
@@ -45,14 +46,17 @@ def prepare_data(
     mask2 = df["ABL"] == 59
     df.loc[mask2, "ABL"] = 60
 
-    mask3 = (df["training_level"] == 16) & (df["ABL"] == 25)
-    df.loc[mask3, "ABL"] = 50
+    mask3 = df["ABL"] == 58
+    df.loc[mask3, "ABL"] = 60
+
+    mask4 = (df["training_level"] == 16) & (df["ABL"] == 25)
+    df.loc[mask4, "ABL"] = 50
 
     # ----------------------------
     # 2. ---- FILTER BY LEVEL ----
     # ----------------------------
-    if training_level_filter is not None:
-        df = df[df["training_level"] == training_level_filter].copy()
+    # if training_level_filter is not None:
+    #     df = df[df["training_level"] == training_level_filter].copy()
 
     # ----------------------------
     # 3. ---- MARK REPEATED TRIALS ----
@@ -88,6 +92,145 @@ def prepare_data(
 
     return df
 
+
+
+
+#prep data for the short durations
+
+DUR_RULES = [(12, 16, 15), (17, 21, 60), (22, 26, 120)]
+RT_MS = 6000
+
+def add_stim_dur(df, sound_col="sound_index", session_col="session_type",
+                 out_col="stim_dur", type1_value=RT_MS):  # set to pd.NA for NaN behavior
+    df = df.copy()
+
+    # default for everything (type1 -> RT_MS, or pd.NA if you prefer)
+    df[out_col] = pd.Series([type1_value] * len(df), index=df.index, dtype="Int64")
+
+    # only compute mapping for session_type == 2 (and only if column exists)
+    if session_col in df.columns:
+        mask = pd.to_numeric(df[session_col], errors="coerce") == 2
+    else:
+        mask = pd.Series(False, index=df.index)
+
+    if mask.any():
+        s = pd.to_numeric(df.loc[mask, sound_col], errors="coerce")
+        conds = [s.between(lo, hi) for lo, hi, _ in DUR_RULES]
+        choices = [dur for _, _, dur in DUR_RULES]
+        df.loc[mask, out_col] = pd.Series(np.select(conds, choices, default=RT_MS), index=df.loc[mask].index).astype("Int64")
+
+    # optional label column
+    df["stim_dur_label"] = np.where(df[out_col] == RT_MS, "RT", df[out_col].astype(str) + "ms")
+    return df
+
+"""
+..######..##.....##..#######..########..########....########..##.....##.########.....###....########.####..#######..##....##..######.
+.##....##.##.....##.##.....##.##.....##....##.......##.....##.##.....##.##.....##...##.##......##.....##..##.....##.###...##.##....##
+.##.......##.....##.##.....##.##.....##....##.......##.....##.##.....##.##.....##..##...##.....##.....##..##.....##.####..##.##......
+..######..#########.##.....##.########.....##.......##.....##.##.....##.########..##.....##....##.....##..##.....##.##.##.##..######.
+.......##.##.....##.##.....##.##...##......##.......##.....##.##.....##.##...##...#########....##.....##..##.....##.##..####.......##
+.##....##.##.....##.##.....##.##....##.....##.......##.....##.##.....##.##....##..##.....##....##.....##..##.....##.##...###.##....##
+..######..##.....##..#######..##.....##....##.......########...#######..##.....##.##.....##....##....####..#######..##....##..######.
+"""
+
+
+
+def _empty_to_na(s: pd.Series) -> pd.Series:
+    """Treat '', ' ', 'nan', 'none' as missing."""
+    if s is None:
+        return s
+    out = s.copy()
+    # strings that should be NA
+    out = out.replace(r"^\s*$", pd.NA, regex=True)
+    out = out.replace({"nan": pd.NA, "NaN": pd.NA, "None": pd.NA, "none": pd.NA})
+    return out
+
+def _extract_first_number_as_numeric(s: pd.Series) -> pd.Series:
+    """Extract first numeric token from strings; return Float64 series."""
+    # If already numeric, keep it; if string, extract digits
+    as_num = pd.to_numeric(s, errors="coerce")
+    if as_num.notna().any():
+        # still also try extracting for the non-numeric rows
+        pass
+    extracted = s.astype("string").str.extract(r"(\d+(?:\.\d+)?)", expand=False)
+    extracted_num = pd.to_numeric(extracted, errors="coerce")
+    return as_num.fillna(extracted_num).astype("Float64")
+
+def normalize_short_sound_fields(
+    df: pd.DataFrame,
+    session_col: str = "session_type",
+    stimdur_col: str = "stim_dur",
+    shortdur_col: str = "short_duration",
+    isshort_col: str = "is_short_sound",
+    long_value: float = 6000,
+) -> pd.DataFrame:
+    """
+    1) Ensure `is_short_sound` exists for all sessions:
+       - If missing/empty: False/0.0 for session_type==1
+       - If missing/empty: False/0.0 for session_type==2 AND stim_dur==6000
+       - Otherwise (session_type==2 AND stim_dur!=6000): True/1.0
+
+    2) Harmonize `short_duration`:
+       - If short_duration empty:
+            * 0 if stim_dur == 6000
+            * else numeric portion of stim_dur (string -> extracted number; numeric -> itself)
+       - Result stored as numeric (Float64) in `short_duration`.
+    """
+    df = df.copy()
+
+    # --- session_type numeric (tolerant) ---
+    if session_col not in df.columns:
+        raise KeyError(f"Missing required column: {session_col}")
+    sess = pd.to_numeric(df[session_col], errors="coerce")
+
+    # --- stim_dur numeric (tolerant: numeric or string with number) ---
+    if stimdur_col not in df.columns:
+        df[stimdur_col] = pd.NA
+    stim_raw = _empty_to_na(df[stimdur_col])
+    stim_num = _extract_first_number_as_numeric(stim_raw)
+
+    # --- short_duration numeric ---
+    if shortdur_col not in df.columns:
+        df[shortdur_col] = pd.NA
+    sd_raw = _empty_to_na(df[shortdur_col])
+    sd_num = _extract_first_number_as_numeric(sd_raw)
+
+    sd_missing = sd_num.isna()
+    # fill empty short_duration using stim_dur rule
+    is_long = stim_num.eq(long_value)
+    sd_num = sd_num.copy()
+    sd_num.loc[sd_missing & is_long] = 0
+    # "numerical portion of the string otherwise" -> use stim_num
+    sd_num.loc[sd_missing & (~is_long)] = stim_num.loc[sd_missing & (~is_long)]
+    df[shortdur_col] = sd_num.astype("Float64")
+
+    # --- is_short_sound ---
+    if isshort_col not in df.columns:
+        df[isshort_col] = pd.NA
+
+    iss_raw = _empty_to_na(df[isshort_col])
+
+    # Coerce various encodings to numeric if present
+    iss_norm = iss_raw.astype("string").str.strip()
+    iss_norm = iss_norm.replace({
+        "TRUE": "1", "True": "1", "true": "1",
+        "FALSE": "0", "False": "0", "false": "0",
+    })
+    iss_num = pd.to_numeric(iss_norm, errors="coerce").astype("Float64")
+
+    iss_missing = iss_num.isna()
+
+    # Infer for missing values:
+    # session_type 1 => False
+    # session_type 2 => True iff stim_dur != 6000 (i.e., short)
+    inferred = ((sess.eq(2)) & (~stim_num.eq(long_value))).astype("Float64")
+
+    # Your explicit conditions are a subset of this inference, but this also fills the "otherwise" case.
+    iss_num.loc[iss_missing] = inferred.loc[iss_missing]
+
+    df[isshort_col] = iss_num.astype("Float64")
+
+    return df
 
 """
 ..######..####..######...##.....##..#######..####.########.
@@ -243,8 +386,17 @@ def compute_bias(df):
         return np.nan
     n_neg = (valid_group["ILD"] < 0).sum()
     n_pos = (valid_group["ILD"] > 0).sum()
-    wrong_right = ((valid_group["response_poke"] == 1) & (valid_group["ILD"] < 0)).sum()
-    wrong_left = ((valid_group['response_poke'] == -1) & (valid_group["ILD"] > 0)).sum()
+    if n_neg == 0 or n_pos == 0:
+        return np.nan
+    resp = pd.to_numeric(valid_group["response_poke"], errors="coerce")
+    if resp.dropna().isin([2, 3]).any():
+        choice = pd.Series(np.where(resp == 3, 1, np.where(resp == 2, -1, np.nan)), index=valid_group.index)
+    elif resp.dropna().isin([-1, 1]).any():
+        choice = resp
+    else:
+        choice = resp
+    wrong_right = ((choice == 1) & (valid_group["ILD"] < 0)).sum()
+    wrong_left = ((choice == -1) & (valid_group["ILD"] > 0)).sum()
     frac_wrong_right = wrong_right / n_neg if n_neg > 0 else 0
     frac_wrong_left = wrong_left / n_pos if n_pos > 0 else 0
     
@@ -1124,34 +1276,65 @@ def overlay_makefig1_psychometrics(ax, plot_data, abl=None, color="black", show_
         ax.plot(x_smooth, sigmoid(x_smooth, *mean_params_dict[abls_to_use[0]]), color=color, linewidth=3, zorder=2)
     
 def extract_rt_points(chrono_data, abl):
-
-    #Extract mean and SEM reaction time (RT) data for a given ABL from the make_fig1 chronometric pickle.
-
     grand_means_data = chrono_data["grand_means_data"]
     if abl not in grand_means_data:
         return None
 
-    stats = grand_means_data[abl]
+    stats = grand_means_data[abl]  # in your pickle this is a DataFrame
     x = np.array(stats["abs_ILD"], dtype=float)
     y = np.array(stats["mean"], dtype=float)
     sem = np.array(stats["sem"], dtype=float)
-    return x, y, sem
 
-def overlay_makefig1_rt(ax, abl, chrono_data, color="black", zorder=-1):
+    # Sort by x (prevents weird zig-zag lines if order ever differs)
+    order = np.argsort(x)
+    return x[order], y[order], sem[order]
 
-    #Overlay mean RT ± SEM from make_fig1 chronometric data onto the current axis.
-    #Drawn behind the colored cohort data.
+_CANON_ABL_COLORS = {
+    20: "C0",
+    40: "C1",
+    50: "C2",
+    60: "C3",
+}
 
+def _resolve_color(color, abl, default="black", force_black=False):
+    if force_black:
+        return "black"
+    # If user passed a single string like "black" / "C3", honor it
+    if isinstance(color, str):
+        return color
+    # If dict and has this ABL, use it
+    if isinstance(color, Mapping) and abl in color:
+        return color[abl]
+    # Otherwise fall back to canonical
+    return _CANON_ABL_COLORS.get(abl, default)
+
+def overlay_makefig1_rt(ax, abl, chrono_data, color="black",
+                        zorder=-1, y_scale=1.0, force_black=False):
     out = extract_rt_points(chrono_data, abl)
     if out is None:
         return
+
     x, y, sem = out
+    y *= y_scale
+    sem *= y_scale
 
-    # Overlay black line and points behind
-    ax.errorbar(x, y, yerr=sem, fmt='o', color=color, markersize=8.5,
-                linewidth=0, elinewidth=1.5, capsize=3, zorder=zorder)
-    ax.plot(x, y, color=color, linewidth=2.5, zorder=zorder)
+    marker_color = _resolve_color(color, abl, default="black", force_black=force_black)
 
+    ax.errorbar(
+        x, y, yerr=sem,
+        fmt="o",
+        linestyle="none",
+        color=marker_color,          # NOTE: no quotes here
+        markerfacecolor=marker_color,
+        markeredgecolor=marker_color,
+        ecolor=marker_color,
+        markersize=8.5,
+        linewidth=3,
+        elinewidth=1.5,
+        capsize=0,
+        zorder=zorder,
+    )
+    ax.plot(x, y, color="black", linewidth=2.5, zorder=zorder)
 
 def overlay_makefig1_rt_individuals(
     ax,

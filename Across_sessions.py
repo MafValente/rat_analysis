@@ -1,4 +1,26 @@
 #%%
+
+import os
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import Psychometric 
+import Helpers.DataHelpers as DataHelpers
+from matplotlib.ticker import MaxNLocator
+
+subject_file = "merged_ASD0053.csv"
+
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort3" # or "cohort1", etc
+
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
+
 """
 
 
@@ -20,60 +42,33 @@ d8P' ?88  d8P' `P  88P'  `d8P' ?88 ?8b,    ?8b,
 
 """
 
-
-import os
-import pandas as pd
-import matplotlib.pyplot as plt
-import numpy as np
-import Psychometric 
-import DataHelpers
-from matplotlib.ticker import MaxNLocator
+# ==============================================================
+# CONFIG: choose which line you're analyzing
+# ==============================================================
 
 
+DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
 
-colors = ["C0", "C1", "C2", "C3"]
-
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
-subject_file = "merged_ASD0022.csv"
-subject_id = subject_file.removeprefix("merged_").removesuffix(".csv")
-
-# keep in mind level is commented
-
+os.chdir(DATA_DIR)
 
 df = pd.read_csv(subject_file)
 
-df = df[df["training_level"]==16]
+colors = ["C0", "C1", "C2", "C3"]
 
-#for levels lower than 7, the ABL is doubled
-mask1 = df["training_level"] < 7
-df.loc[mask1, "ABL"] = pd.to_numeric(df.loc[mask1, "ABL"], errors="coerce") * 2
-
-mask2 = df["ABL"] == 59
-df.loc[mask2, "ABL"] = 60
-
-mask3 = (df["training_level"] == 16) & (df["ABL"] == 25)
-df.loc[mask3, "ABL"] = 50
+subject_id = subject_file.removeprefix("merged_").removesuffix(".csv")
 
 # 1) Inspect what you actually have
 print(df["repeated_trial"].astype(str).str.strip().str.upper().value_counts(dropna=False))
 
-# 2) Build a robust FALSE-only mask (keeps only valid trials)
-mask_false = (
-    df["repeated_trial"]
-      .astype(str)
-      .str.strip()
-      .str.upper()
-      .eq("FALSE")
-)
-
-df_valid = df[mask_false].copy()
-
 # --- Prep session(s) data
+df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
 
-#df = df[df["training_level"] == 16]
+df = df[df["training_level"]<16].copy()
+
+df_valid = df[df["trial_is_repeat"]==False].copy()
 
 meanRT_per_session = (
-    df_valid[(df_valid["success"] == 1) & (df_valid["timed_rt"] <= 2)] #ignore outliers
+    df_valid[(df_valid["success"] == 1) & (df_valid["timed_rt"] <= 1.2)] #ignore outliers
     #.assign(timed_rt=lambda d: d["timed_rt"].clip(upper=1))  # cap RTs at 1s by chamging values
     .groupby(["session", "ABL"])["timed_rt"]
     .agg(["mean", "std", "count"])
@@ -81,7 +76,7 @@ meanRT_per_session = (
 )
 
 meanMT_per_session = (
-    df_valid[(df_valid["success"] == 1) & (df_valid["timed_mt"] <= 2)] 
+    df_valid[(df_valid["success"] == 1) & (df_valid["timed_mt"] <= .8)] 
     #.assign(timed_mt=lambda d: d["timed_mt"].clip(upper=1))  # cap MTs at 1s
     .groupby(["session", "ABL"])["timed_mt"]
     .agg(["mean", "std", "count"])
@@ -163,7 +158,6 @@ completedTrial_count_summary = DataHelpers.count_trials(df_valid, df_valid["succ
 CNPA_count_summary = DataHelpers.count_trials(df, df["abort_type"] == "CNP", "cnp")
 A_count_summary = DataHelpers.count_trials(df, (df["abort_type"] != "CNP") & (df["success"] == 0), "aborted")
 
-#%%
 #----- plotting
 
 fig = plt.figure()
@@ -194,10 +188,19 @@ plt.plot(
     )
 
 # Shade background bands for the current subject
+
 current_subject = subject_id
 change_csv = "change_points.csv"       # <- path to your CSV
 ax = plt.gca()
-regions = DataHelpers.shade_change_regions_from_csv(ax, change_csv, current_subject)
+
+if os.path.exists(change_csv):
+    regions = DataHelpers.shade_change_regions_from_csv(ax, change_csv, current_subject)
+    changes = 1
+else:
+    # no file → just don't shade anything
+    print(f"⚠️ No change_points.csv found at {change_csv}; skipping background shading.")
+    changes = 0
+
 
 ax.xaxis.set_major_locator(MaxNLocator(integer=True))
 plt.legend(loc="upper center")
@@ -211,7 +214,7 @@ plt.show()
 
 #%%
 
-fig, axes = plt.subplots(3, 3, figsize=(18, 15))
+fig, axes = plt.subplots(3, 3, figsize=(28, 23))
 
 
 for i, abl in enumerate(sorted(meanRT_per_session["ABL"].unique())):
@@ -226,7 +229,12 @@ for i, abl in enumerate(sorted(meanRT_per_session["ABL"].unique())):
         marker="o", capsize=5
     )
 
-DataHelpers.draw_regions(axes[0,0], regions, alpha=1)
+
+if changes==1:
+    DataHelpers.draw_regions(axes[0,0], regions, alpha=1)
+else:
+    # no file → just don't shade anything
+    print(f"⚠️ No change_points.csv found at {change_csv}; skipping background shading.")
 
 
 axes[0,0].xaxis.set_major_locator(MaxNLocator(integer=True))
@@ -248,7 +256,11 @@ for i, abl in enumerate(sorted(meanMT_per_session["ABL"].unique())):
         marker="o", capsize=5
     )
 
-DataHelpers.draw_regions(axes[0,1], regions, alpha=1)
+if changes==1:
+    DataHelpers.draw_regions(axes[0,1], regions, alpha=1)
+else:
+    # no file → just don't shade anything
+    print(f"⚠️ No change_points.csv found at {change_csv}; skipping background shading.")
 
 axes[0,1].xaxis.set_major_locator(MaxNLocator(integer=True))
 axes[0,1].set_xlabel("Session")
@@ -268,7 +280,13 @@ for i, abl in enumerate(sorted(meanAcc_per_session["ABL"].unique())):
         marker="o"
     )
 
-DataHelpers.draw_regions(axes[0,2], regions, alpha=1)
+if changes==1:
+    DataHelpers.draw_regions(axes[0,2], regions, alpha=1)
+else:
+    # no file → just don't shade anything
+    print(f"⚠️ No change_points.csv found at {change_csv}; skipping background shading.")
+
+
 axes[0,2].xaxis.set_major_locator(MaxNLocator(integer=True))
 axes[0,2].set_xlabel("Session")
 axes[0,2].set_ylabel("Accuracy (proportion correct)")
@@ -288,7 +306,11 @@ for i, abl in enumerate(sorted(meanFA_per_session["ABL"].unique())):
         marker="o"
     )
 
-DataHelpers.draw_regions(axes[1,0], regions, alpha=1)
+if changes==1:
+    DataHelpers.draw_regions(axes[1,0], regions, alpha=1)
+else:
+    # no file → just don't shade anything
+    print(f"⚠️ No change_points.csv found at {change_csv}; skipping background shading.")
 
 axes[1,0].xaxis.set_major_locator(MaxNLocator(integer=True))
 axes[1,0].set_xlabel("Session")
@@ -307,7 +329,11 @@ for i, abl in enumerate(sorted(meanMTA_per_session["ABL"].unique())):
         linestyle="-",
         marker="o"
     )
-DataHelpers.draw_regions(axes[1,1], regions, alpha=1)
+if changes==1:
+    DataHelpers.draw_regions(axes[1,1], regions, alpha=1)
+else:
+    # no file → just don't shade anything
+    print(f"⚠️ No change_points.csv found at {change_csv}; skipping background shading.")
 
 axes[1,1].xaxis.set_major_locator(MaxNLocator(integer=True))
 axes[1,1].set_xlabel("Session")
@@ -327,7 +353,11 @@ for i, abl in enumerate(sorted(meanRTA_per_session["ABL"].unique())):
         marker="o"
     )
 
-DataHelpers.draw_regions(axes[1,2], regions, alpha=1)
+if changes==1:
+    DataHelpers.draw_regions(axes[1,2], regions, alpha=1)
+else:
+    # no file → just don't shade anything
+    print(f"⚠️ No change_points.csv found at {change_csv}; skipping background shading.")
 
 axes[1,2].xaxis.set_major_locator(MaxNLocator(integer=True))
 axes[1,2].set_xlabel("Session")
@@ -356,7 +386,11 @@ for i, abl in enumerate(sorted(bias_summary["ABL"].unique())):
         fmt='o-', capsize=4
     )
 
-DataHelpers.draw_regions(axes[2,0], regions, alpha=1)
+if changes==1:
+    DataHelpers.draw_regions(axes[2,0], regions, alpha=1)
+else:
+    # no file → just don't shade anything
+    print(f"⚠️ No change_points.csv found at {change_csv}; skipping background shading.")
 
 axes[2,0].xaxis.set_major_locator(MaxNLocator(integer=True))
 axes[2,0].axhline(0, color='k', linestyle='--', alpha=0.7)  # no-bias line
@@ -375,7 +409,11 @@ for i, abl in enumerate(sorted(rep_per_session["ABL"].unique())):
         marker="o"
     )
 
-DataHelpers.draw_regions(axes[2,1], regions, alpha=1)
+if changes==1:
+    DataHelpers.draw_regions(axes[2,1], regions, alpha=1)
+else:
+    # no file → just don't shade anything
+    print(f"⚠️ No change_points.csv found at {change_csv}; skipping background shading.")
 
 axes[2,1].xaxis.set_major_locator(MaxNLocator(integer=True))
 axes[2,1].axhline(0.5, color='k', linestyle='--', alpha=0.7)  # 0.5 = no bias (random)
@@ -393,7 +431,11 @@ for i, abl in enumerate(sorted(rep_split["ABL"].unique())):
     axes[2,2].plot(sub["session"], sub["after_right"], '>-', color = color)
 
 
-DataHelpers.draw_regions(axes[2,2], regions, alpha=1)
+if changes==1:
+    DataHelpers.draw_regions(axes[2,2], regions, alpha=1)
+else:
+    # no file → just don't shade anything
+    print(f"⚠️ No change_points.csv found at {change_csv}; skipping background shading.")
 
 axes[2,2].xaxis.set_major_locator(MaxNLocator(integer=True))
 axes[2,2].axhline(0.5, color='k', linestyle='--', alpha=0.7)  # chance level
@@ -436,4 +478,3 @@ print("Excluded sessions:")
 for line in report:
     print("-", line)
 
-# for use in deeper analysis I guess

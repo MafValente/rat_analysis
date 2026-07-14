@@ -1,5 +1,9 @@
 DataFiles/
 DataFiles/
+GroupComparison/_cache/
+.matplotlib/
+.ipynb_checkpoints/
+outputs/
 __pycache__/
 *.pyc
 .DS_Store

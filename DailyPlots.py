@@ -4,11 +4,31 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import Psychometric 
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 import matplotlib as mpl
 import pickle
 
-subject_file = "merged_ASD0021.csv"
+subject_file = "merged_ASD0026.csv"
+
+# ==============================================================
+# CONFIG: choose which line you're analyzing
+# ==============================================================
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort3" # or "cohort1", etc
+
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
+
+DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
+
+os.chdir(DATA_DIR)
+
+df = pd.read_csv(subject_file)
 
 """
 
@@ -109,13 +129,17 @@ makefig1_chrono = load_makefig1_chrono(
 
 makefig1_data = DataHelpers.normalize_ABL_labels(makefig1_data)
 
-
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
-
-df = pd.read_csv(subject_file)
-
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
+df = df[df["trial_is_repeat"] == False].copy()
 
+df = df[df["training_level"]==16].copy()
+
+
+sess = pd.to_numeric(df["session_type"], errors="coerce")
+sd   = pd.to_numeric(df["stim_dur"], errors="coerce")
+short_duration   = pd.to_numeric(df["short_duration"], errors="coerce")
+
+df = df[(sess == 1) | (sd == 6000) | (short_duration == 0)].copy()
 
 # Prep session data
 df_last = df
@@ -315,7 +339,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import Psychometric 
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 import matplotlib as mpl
 
 """
@@ -346,6 +370,34 @@ d8P' ?88  d8P' ?88  d8P' ?88    88P'  `d8b_,dPd8P' ?88  d8P' ?88    88P   d8b_,d
  Group Summary — with GroupComparison Aesthetics
 =============================================================
 """
+
+# ==============================================================
+# CONFIG: choose which line you're analyzing
+# ==============================================================
+LINE = "SHANK3"   # or "SHANK3"
+COHORT = "cohort1" # or "cohort1", etc
+
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
+
+DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE, COHORT])
+
+os.chdir(DATA_DIR)
+
+# ==============================================================
+# === LOAD & FILTER DATA =======================================
+# ==============================================================
+
+cohort_file = "merged_all_subjects.csv"
+df = pd.read_csv(cohort_file)
+
+df = df[df["training_level"] == 16]
+df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
+df = df[df["trial_is_repeat"]==False].copy()
 
 # ==============================================================
 # === CONFIG (Aesthetic constants) =============================
@@ -397,39 +449,6 @@ def sem(series):
     return series.std(ddof=1) / np.sqrt(n) if n > 0 else np.nan
 
 
-
-# ==============================================================
-# === LOAD & FILTER DATA =======================================
-# ==============================================================
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
-cohort_file = "merged_all_subjects.csv"
-df = pd.read_csv(cohort_file)
-
-df = df[df["training_level"] == 16]
-df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
-
-
-#Restrict animals, sex, or genotype
-
-"""
-
-df_sel = DataHelpers.restrict_subjects(
-    df, "sex_gen.csv",
-    sex="female",
-    genotypes="het",
-    subject_col="animal",      # omit if you want auto-detect
-    attach_meta=True
-)
-
-
-df_sel = DataHelpers.restrict_subjects(
-    df, "sex_gen.csv",
-    sex="female",
-    subject_col="animal",      # omit if you want auto-detect
-    attach_meta=True
-)
-"""
-
 # ==============================================================
 # === CONTRIBUTOR STATS ========================================
 # ==============================================================
@@ -454,9 +473,6 @@ contributors_by_setup = (
          n_subjects=lambda s: s.nunique())
     .reset_index()
 )
-#print("\nContributors by setup:")
-#print(contributors_by_setup.head())
-
 
 # ==============================================================
 # === COMPUTE GROUP METRICS ====================================
@@ -662,19 +678,29 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import Psychometric
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 
 """
 =============================================================
  Group-by-Setup Summary — with GroupComparison Aesthetics
 =============================================================
 """
+# ==============================================================
+# CONFIG: choose which line you're analyzing
+# ==============================================================
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort2" # or "cohort1", etc
 
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
 
-# ----- choose a palette -----
-# Good categorical options: "Set2", "tab10", "Dark2", "Accent", "tab20", "Paired"
-# (continuous but nice: "viridis", "plasma", "turbo")
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
 
+DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
+
+os.chdir(DATA_DIR)
 
 # ==============================================================
 # === CONFIG ===================================================
@@ -698,6 +724,26 @@ mpl.rcParams.update({
     "xtick.direction": "out",
     "ytick.direction": "out",
 })
+
+# ==============================================================
+# === LOAD & FILTER DATA =======================================
+# ==============================================================
+cohort_file = "merged_all_subjects.csv"
+df = pd.read_csv(cohort_file)
+df = df[df["session"] >= 13]
+
+df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
+df = df[df["trial_is_repeat"]==False].copy()
+
+if SETUP_COL not in df.columns:
+    raise KeyError(f"'{SETUP_COL}' column not found in dataframe.")
+
+ABLs = sorted(df["ABL"].unique())
+setups = sorted(df[SETUP_COL].dropna().unique())
+
+# Color map per setup
+cmap = plt.cm.get_cmap(PALETTE)
+color_for_setup = {s: cmap(i / max(len(setups) - 1, 1)) for i, s in enumerate(setups)}
 
 # ==============================================================
 # === STYLE HELPERS ============================================
@@ -725,28 +771,6 @@ def _style_axes(ax, title=None, xlabel=None, ylabel=None):
 def sem(series):
     n = series.count()
     return series.std(ddof=1) / np.sqrt(n) if n > 0 else np.nan
-
-
-# ==============================================================
-# === LOAD & FILTER DATA =======================================
-# ==============================================================
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
-cohort_file = "merged_all_subjects.csv"
-df = pd.read_csv(cohort_file)
-df = df[df["session"] >= 13]
-
-df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
-
-if SETUP_COL not in df.columns:
-    raise KeyError(f"'{SETUP_COL}' column not found in dataframe.")
-
-ABLs = sorted(df["ABL"].unique())
-setups = sorted(df[SETUP_COL].dropna().unique())
-
-# Color map per setup
-cmap = plt.cm.get_cmap(PALETTE)
-color_for_setup = {s: cmap(i / max(len(setups) - 1, 1)) for i, s in enumerate(setups)}
-
 
 # ==============================================================
 # === COMPUTE STATS ============================================

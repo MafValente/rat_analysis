@@ -10,6 +10,8 @@
 ..######..####.##....##..######...########.########...
 """
 
+subject_file = "merged_ASD0049.csv"
+
 # ===============================================================
 #   IMPORTS
 # ===============================================================
@@ -17,21 +19,43 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import os
 import pandas as pd
-import DataHelpers
+import Helpers.DataHelpers as DataHelpers
 import numpy as np
+
+# ==============================================================
+# CONFIG: choose which line you're analyzing
+# ==============================================================
+LINE = "SHANK3"   # or "SHANK3"
+COHORT = "cohort1" # or "cohort1", etc
+
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
+
+DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
+
+os.chdir(DATA_DIR)
 
 # ===============================================================
 #   Setup & data loading
 # ===============================================================
 
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
-
-subject_file = "merged_ASD0021.csv"
 subject_id = subject_file.removeprefix("merged_").removesuffix(".csv")
 
 df = pd.read_csv(subject_file)
 df = df[df["training_level"] ==16]
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
+
+df = df[df["trial_is_repeat"]==False].copy()
+#df = df[df["session"]>13].copy()
+
+sess = pd.to_numeric(df["session_type"], errors="coerce")
+sd   = pd.to_numeric(df["stim_dur"], errors="coerce")
+df = df[(sess == 1) | (sd == 6000)].copy()
 
 df_valid = df[df["abort_type"]!="CNP"].copy()
 
@@ -231,6 +255,7 @@ plt.show()
 df_rt = df_valid.dropna(subset=["timed_rt", "ABL"]).copy()
 df_rt = df_rt[df_rt["ABL"] != 50]   # exclude ABL = 50
 
+
 # --- Set fixed bin width ---
 bin_width = 0.01   # <-- CHANGE THIS to whatever bin size you need
 rt_min = df_rt["timed_rt"].min()
@@ -295,9 +320,24 @@ plt.show()
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import DataHelpers   # your module
+import Helpers.DataHelpers as DataHelpers   # your module
 import os
 import seaborn as sns
+
+# ==============================================================
+# CONFIG: choose which line you're analyzing
+# ==============================================================
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort2" # or "cohort1", etc
+
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
+
+DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
 
 # ===============================================================
 #   GLOBAL BIN WIDTHS FOR ALL COLUMNS
@@ -495,16 +535,28 @@ if __name__ == "__main__":
 
 
     # Load merged_all
-    os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
+    os.chdir(DATA_DIR)
     df = pd.read_csv("merged_all_subjects.csv")
     # path to your meta file
-    META_CSV = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2/sex_gen.csv"
+    META_CSV = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/CNTNAP2_cohort2/sex_gen.csv"
 
 
     # preprocessing
+
     df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
-    df = df[df["training_level"] == 16].copy()
-    df = df[df["abort_type"]!="CNP"].copy()
+
+    df = df[df["trial_is_repeat"]==False].copy()
+
+    sess = pd.to_numeric(df["session_type"], errors="coerce")
+    sd   = pd.to_numeric(df["stim_dur"], errors="coerce")
+    df = df[(sess == 1) | (sd == 6000)].copy()
+
+    df_valid = df[df["abort_type"]!="CNP"].copy()
+
+    mask_aborts = (
+        (df["abort_type"] == "Fixation")
+    )
+    df_aborts = df[mask_aborts].copy()
 
     # which timing columns to analyze
     timing_columns = [
@@ -528,6 +580,7 @@ if __name__ == "__main__":
     )
 
 #%%
+#Panels are genotypes
 
 def compute_group_abl_rt_views(merged_all, views, bins, animal_col="animal"):
     """
@@ -634,4 +687,86 @@ results_rt = compute_group_abl_rt_views(df, views, bins_rt)
 # ----- plot -----
 plot_rt_by_abl(results_rt, bins_rt, subject_id="All Animals")
 
-# %%
+# %% 
+# Panels are ABLs
+
+
+def plot_rt_by_abl_panels(results, bins, subject_id):
+    """
+    One panel per ABL (20, 40, 60).
+    Inside each panel: RT curves for each genotype.
+    """
+    # Find which ABLs actually exist in results
+    all_abls = sorted(
+        {abl
+         for geno_dict in results.values()
+         for abl, v in geno_dict.items()
+         if v is not None}
+    )
+    if not all_abls:
+        print("No ABL data found in results.")
+        return
+
+    genos = list(results.keys())
+
+    fig, axes = plt.subplots(
+        1, len(all_abls),
+        figsize=(5 * len(all_abls), 4),
+        sharey=True
+    )
+
+    if len(all_abls) == 1:
+        axes = [axes]
+
+    # Color by genotype using matplotlib default colors C0, C1, C2
+    # (for wt, het, hom in that order)
+    colors = {g: f"C{i}" for i, g in enumerate(genos)}
+
+    for ax, abl in zip(axes, all_abls):
+        for geno in genos:
+            item = results[geno].get(abl)
+            if item is None:
+                continue
+
+            mids, mean, sem = item
+
+            ax.step(
+                mids,
+                mean,
+                where="mid",
+                color=colors[geno],
+                label=geno.upper(),
+                linewidth=1.8,
+            )
+            ax.fill_between(
+                mids,
+                mean - sem,
+                mean + sem,
+                step="mid",
+                alpha=0.25,
+                color=colors[geno],
+            )
+
+        ax.set_title(f"ABL {abl}")
+        ax.set_xlabel("RT (s)")
+        ax.grid(False)
+
+    # Shared y-label on the first axis
+    axes[0].set_ylabel("Density")
+
+    # Same x-limits for all panels
+    for ax in axes:
+        ax.set_xlim(0, 0.7)
+
+    # Single legend (on the first axis or outside if you prefer)
+    axes[0].legend(title="Genotype")
+
+    plt.suptitle(
+        f"RT Distributions by Genotype\n{subject_id}",
+        fontsize=15
+    )
+    plt.tight_layout()
+    plt.show()
+
+# ----- third plot: panels = ABL, curves = genotypes -----
+plot_rt_by_abl_panels(results_rt, bins_rt, subject_id="All Animals")

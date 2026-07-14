@@ -1,5 +1,48 @@
 #%%
 
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+import matplotlib.font_manager as fm
+import pickle
+import Psychometric
+import Helpers.DataHelpers as DataHelpers
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
+import os
+
+# ==============================================================
+# CONFIG: choose which line you're analyzing
+# ==============================================================
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort2" # or "cohort1", etc
+
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
+
+DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
+
+os.chdir(DATA_DIR)
+
+views = [
+    (
+        "wt",
+        lambda d: DataHelpers.restrict_subjects(
+            d,
+            "sex_gen.csv",
+            genotypes="wt",
+            subject_col="animal",
+            genotype_col="genotype",
+            attach_meta=True,
+        ),
+    ),
+]
+
 """
 ..######..####.##....##..######...##.......########....########...#######..##......##
 .##....##..##..###...##.##....##..##.......##..........##.....##.##.....##.##..##..##
@@ -15,16 +58,6 @@ GroupComparison (original look, with ILD remapping)
 - Only modification: plot ABL ±50 at x=±18 but label ticks as ±50.
 """
 
-import os
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-import matplotlib.font_manager as fm
-import pickle
-import Psychometric
-import DataHelpers
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 
 # ==============================================================
@@ -57,7 +90,6 @@ if 35 in makefig1_data["ABLS"]:
 # ==============================================================
 # === CONFIG ===================================================
 # ==============================================================
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
 cohort_file = "merged_all_subjects.csv"
 
 error_mode = "individuals"  # "sem" or "individuals"
@@ -65,20 +97,6 @@ MASK_59_TO_60 = True
 MASK_25_TO_50_WHEN_TL16 = True
 TRAINING_MIN = 16
 SESSION_MIN = 13
-
-views = [
-    (
-        "wt",
-        lambda d: DataHelpers.restrict_subjects(
-            d,
-            "sex_gen.csv",
-            genotypes="wt",
-            subject_col="animal",
-            genotype_col="genotype",
-            attach_meta=True,
-        ),
-    ),
-]
 
 TITLE_FONTSIZE = 24
 LABEL_FONTSIZE = 25
@@ -107,6 +125,7 @@ SKIP_PSY_FITS = {50}
 # ==============================================================
 df = pd.read_csv(cohort_file)
 df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
+df = df[df["trial_is_repeat"]==False].copy()
 if "training_level" in df.columns:
     df = df[df["training_level"] >= TRAINING_MIN]
 if "session" in df.columns:
@@ -597,6 +616,49 @@ else:
 #%%
 
 
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+import matplotlib.font_manager as fm
+import pickle
+import Psychometric
+import Helpers.DataHelpers as DataHelpers
+
+# ==============================================================
+# CONFIG: choose which line you're analyzing
+# ==============================================================
+LINE = "CNTNAP2"   # or "SHANK3"
+COHORT = "cohort2" # or "cohort1", etc
+
+BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+LINE_ROOTS = {
+     ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",
+     ("SHANK3", "cohort1"): "SHANK3_cohort1",
+ }
+
+DATA_DIR = os.path.join(BASE_DATA_DIR, LINE_ROOTS[LINE,COHORT])
+
+os.chdir(DATA_DIR)
+
+# Views
+views = [
+    ("wt", lambda d: DataHelpers.restrict_subjects(
+        d, "sex_gen.csv",  genotypes="wt",
+        subject_col="animal", genotype_col="genotype", attach_meta=True)),
+
+
+    ("het",   lambda d: DataHelpers.restrict_subjects(
+        d, "sex_gen.csv", genotypes="het", 
+        subject_col="animal", genotype_col="genotype", attach_meta=True)),
+
+    ("hom",   lambda d: DataHelpers.restrict_subjects(
+        d, "sex_gen.csv", genotypes="hom",
+        subject_col="animal", genotype_col="genotype", attach_meta=True)),
+]
+
 """
 .##.....##.##.....##.##.......########.####....########...#######..##......##
 .###...###.##.....##.##..........##.....##.....##.....##.##.....##.##..##..##
@@ -613,16 +675,6 @@ GroupComparison (updated)
 - Styling aligned with make_fig1.py.
 - Conditional skipping of psychometric fit curves for selected ABLs.
 """
-
-import os
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-import matplotlib.font_manager as fm
-import pickle
-import Psychometric
-import DataHelpers
 
 # Old Data overlay
 
@@ -666,7 +718,7 @@ if 35 in makefig1_chrono["plot_abls"]:
 
 # --- Paths / input file ---
 # (leave as-is or override before running)
-os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles/ASD_cohort2")
+
 cohort_file = "merged_all_subjects.csv"
 
 # --- Analysis choices ---
@@ -680,18 +732,6 @@ MASK_59_TO_60 = True
 MASK_25_TO_50_WHEN_TL16 = True
 TRAINING_MIN = 16
 SESSION_MIN  = 13
-
-# Views
-views = [
-    ("Female wt", lambda d: DataHelpers.restrict_subjects(
-        d, "sex_gen.csv", sex="female",  genotypes="wt",
-        subject_col="animal", genotype_col="genotype", attach_meta=True)),
-
-
-    ("Male wt",   lambda d: DataHelpers.restrict_subjects(
-        d, "sex_gen.csv", sex="male", genotypes="wt",
-        subject_col="animal", genotype_col="genotype", attach_meta=True)),
-]
 
 # --- Aesthetic choices copied from make_fig1.py ---
 TITLE_FONTSIZE   = 24
@@ -719,8 +759,8 @@ FEMALE = "#e75480"   # pink
 MALE   = "#1f77b4"   # blue
 
 preferred_view_colors = {
-    "Female wt": FEMALE,
-    "Male wt":   MALE,
+    "female": FEMALE,
+    "male":   MALE,
 }
 
 # Skip psychometric fit curves for specific ABLs (keep mean points ± SEM)
@@ -731,14 +771,8 @@ SKIP_PSY_FITS = {50}  # edit to set(), or e.g., {50, 60}
 # =========================
 df = pd.read_csv(cohort_file)
 
-if MASK_59_TO_60:
-    mask = df["ABL"] == 59
-    df.loc[mask, "ABL"] = 60
-
-if MASK_25_TO_50_WHEN_TL16:
-    mask = (df["training_level"] == 16) & (df["ABL"] == 25)
-    df.loc[mask, "ABL"] = 50
-
+df = DataHelpers.prepare_data(df, session_col="session", trial_col="trial")
+df = df[df["trial_is_repeat"]==False].copy()
 if "training_level" in df.columns:
     df = df[df["training_level"] >= TRAINING_MIN]
 if "session" in df.columns:
