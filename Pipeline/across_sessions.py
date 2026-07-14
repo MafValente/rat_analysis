@@ -114,6 +114,16 @@ def prepare_across_sessions_data(
     trial_counts = {
         "completed": DataHelpers.count_trials(df_valid, df_valid["success"] != 0, "completed"),
         "cnp": DataHelpers.count_trials(df, df["abort_type"] == "CNP", "cnp"),
+        "fixation_aborted": DataHelpers.count_trials(
+            df,
+            (df["abort_type"] == "Fixation") & (df["success"] == 0),
+            "fixation_aborted",
+        ),
+        "other_aborted": DataHelpers.count_trials(
+            df,
+            df["success"].eq(0) & ~df["abort_type"].isin(["CNP", "Fixation"]),
+            "other_aborted",
+        ),
         "aborted": DataHelpers.count_trials(
             df,
             (df["abort_type"] != "CNP") & (df["success"] == 0),
@@ -189,8 +199,15 @@ def plot_trial_counts(
         label="CNP Aborts",
     )
     ax.plot(
-        trial_counts["aborted"]["session"],
-        trial_counts["aborted"]["trial_count"],
+        trial_counts["fixation_aborted"]["session"],
+        trial_counts["fixation_aborted"]["trial_count"],
+        linestyle="-",
+        marker="o",
+        label="Fix Aborts",
+    )
+    ax.plot(
+        trial_counts["other_aborted"]["session"],
+        trial_counts["other_aborted"]["trial_count"],
         linestyle="-",
         marker="o",
         label="Other Aborts",
@@ -343,8 +360,15 @@ def plot_across_sessions_combined(
         label="CNP Aborts",
     )
     ax_counts.plot(
-        trial_counts["aborted"]["session"],
-        trial_counts["aborted"]["trial_count"],
+        trial_counts["fixation_aborted"]["session"],
+        trial_counts["fixation_aborted"]["trial_count"],
+        linestyle="-",
+        marker="o",
+        label="Fix Aborts",
+    )
+    ax_counts.plot(
+        trial_counts["other_aborted"]["session"],
+        trial_counts["other_aborted"]["trial_count"],
         linestyle="-",
         marker="o",
         label="Other Aborts",

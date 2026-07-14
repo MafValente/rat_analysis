@@ -30,6 +30,7 @@ BIASED_SESSION_TYPES = (3, 23)
 UNBIASED_RT_SESSION_TYPES = (1, 2)
 SHORT_DURATION_VALUE = 0
 PSYCHOMETRIC_L2 = 0.0
+DEFAULT_UNBIASED_IMBALANCE = 0.35
 BLOCK_ORDER = ["unbiased", "rightward", "leftward"]
 BLOCK_COLORS = {
     "unbiased": "#4D4D4D",
@@ -352,23 +353,123 @@ def _session_key_columns(df: pd.DataFrame) -> list[str]:
     return [c for c in ["dataset_key", "animal", "session"] if c in df.columns]
 
 
-def classify_block_direction(
+def _block_valid_mask(block_df: pd.DataFrame) -> pd.Series:
+    if "success" not in block_df.columns:
+        return pd.Series(True, index=block_df.index, dtype=bool)
+    success = pd.to_numeric(block_df["success"], errors="coerce")
+    return success.ne(0)
+
+
+def _contiguous_block_runs(session_df: pd.DataFrame) -> list[pd.Index]:
+    if session_df.empty:
+        return []
+
+    if "trial" in session_df.columns:
+        ordered = session_df.sort_values("trial", kind="stable")
+    else:
+        ordered = session_df.sort_index(kind="stable")
+
+    if "block" not in ordered.columns or not ordered["block"].notna().any():
+        return [ordered.index]
+
+    block_values = pd.to_numeric(ordered["block"], errors="coerce")
+    transitions = block_values.ne(block_values.shift())
+    transitions.iloc[0] = True
+    run_ids = transitions.cumsum()
+    return [sub.index for _, sub in ordered.groupby(run_ids, sort=False, dropna=False)]
+
+
+def _session_block_number(block_df: pd.DataFrame) -> int | pd._libs.missing.NAType:
+    if "block" not in block_df.columns:
+        return pd.NA
+    block_number = pd.to_numeric(block_df["block"], errors="coerce").dropna()
+    if block_number.empty:
+        return pd.NA
+    return int(block_number.iloc[0])
+
+
+def _looks_like_balanced_unbiased_block(block_df: pd.DataFrame) -> bool:
+    ild = pd.to_numeric(block_df.get("ILD"), errors="coerce")
+    ild = ild[ild.notna() & ild.ne(0)]
+    if ild.empty:
+        return False
+
+    counts = ild.value_counts().sort_index()
+    if counts.empty or counts.nunique() != 1:
+        return False
+
+    ild_values = counts.index.to_numpy(dtype=float)
+    if len(ild_values) % 2 != 0:
+        return False
+
+    negatives = np.sort(ild_values[ild_values < 0])
+    positives = np.sort(ild_values[ild_values > 0])
+    if len(negatives) == 0 or len(positives) == 0 or len(negatives) != len(positives):
+        return False
+    if not np.array_equal(np.abs(negatives), positives):
+        return False
+
+    return True
+
+
+def classify_block_condition(
     block_df: pd.DataFrame,
     *,
     rightward_ild_sign: int = 1,
     min_imbalance: float = 0.0,
+    max_unbiased_imbalance: float = DEFAULT_UNBIASED_IMBALANCE,
 ) -> str | pd._libs.missing.NAType:
-    ild = pd.to_numeric(block_df["ILD"], errors="coerce")
+    valid_mask = _block_valid_mask(block_df)
+    valid_count = int(valid_mask.sum())
+    ild = pd.to_numeric(block_df.loc[valid_mask, "ILD"], errors="coerce")
     ild = ild[ild.notna() & ild.ne(0)]
     if ild.empty:
         return pd.NA
 
     signed_imbalance = np.sign(ild).mean()
-    if not np.isfinite(signed_imbalance) or abs(signed_imbalance) <= min_imbalance:
+    if not np.isfinite(signed_imbalance):
+        return pd.NA
+
+    if abs(signed_imbalance) <= float(max_unbiased_imbalance):
+        if "trials_per_block" in block_df.columns:
+            target = pd.to_numeric(block_df["trials_per_block"], errors="coerce").dropna()
+            if not target.empty:
+                target_trials = float(target.iloc[0])
+                if np.isfinite(target_trials) and target_trials > 0 and valid_count > (1.5 * target_trials):
+                    return pd.NA
+        return "unbiased"
+
+    if abs(signed_imbalance) <= min_imbalance:
         return pd.NA
 
     block_sign = 1 if signed_imbalance > 0 else -1
     return "rightward" if block_sign == int(rightward_ild_sign) else "leftward"
+
+
+def assign_session_block_conditions(
+    session_df: pd.DataFrame,
+    *,
+    rightward_ild_sign: int = 1,
+    min_imbalance: float = 0.0,
+    max_unbiased_imbalance: float = DEFAULT_UNBIASED_IMBALANCE,
+) -> list[tuple[pd.Index, str | pd._libs.missing.NAType]]:
+    assignments: list[tuple[pd.Index, str | pd._libs.missing.NAType]] = []
+    for block_idx in _contiguous_block_runs(session_df):
+        block_df = session_df.loc[block_idx]
+        block_number = _session_block_number(block_df)
+        if pd.notna(block_number) and int(block_number) == 1:
+            condition = "unbiased"
+        elif _looks_like_balanced_unbiased_block(block_df):
+            condition = "unbiased"
+        else:
+            condition = classify_block_condition(
+                block_df,
+                rightward_ild_sign=rightward_ild_sign,
+                min_imbalance=min_imbalance,
+                max_unbiased_imbalance=max_unbiased_imbalance,
+            )
+        assignments.append((block_idx, condition))
+    return assignments
 
 
 def add_biased_block_condition(
@@ -379,6 +480,7 @@ def add_biased_block_condition(
     short_duration_value: Any = SHORT_DURATION_VALUE,
     rightward_ild_sign: int = 1,
     min_direction_imbalance: float = 0.0,
+    max_unbiased_imbalance: float = DEFAULT_UNBIASED_IMBALANCE,
 ) -> pd.DataFrame:
     df = df.copy()
     sess = _numeric_col(df, "session_type")
@@ -398,29 +500,14 @@ def add_biased_block_condition(
         if session_df.empty:
             continue
 
-        if "block" in session_df.columns and session_df["block"].notna().any():
-            block_values = sorted(pd.to_numeric(session_df["block"], errors="coerce").dropna().unique())
-            block_series = pd.to_numeric(df.loc[session_df.index, "block"], errors="coerce")
-        else:
-            block_values = [1]
-            block_series = pd.Series(1, index=session_df.index)
-
-        if not block_values:
-            continue
-
-        first_block = block_values[0]
-        first_idx = session_df.index[block_series.eq(first_block)]
-        df.loc[first_idx, "block_condition"] = "unbiased"
-
-        for block_value in block_values[1:]:
-            block_idx = session_df.index[block_series.eq(block_value)]
-            direction = classify_block_direction(
-                df.loc[block_idx],
-                rightward_ild_sign=rightward_ild_sign,
-                min_imbalance=min_direction_imbalance,
-            )
-            if pd.notna(direction):
-                df.loc[block_idx, "block_condition"] = direction
+        for block_idx, condition in assign_session_block_conditions(
+            session_df,
+            rightward_ild_sign=rightward_ild_sign,
+            min_imbalance=min_direction_imbalance,
+            max_unbiased_imbalance=max_unbiased_imbalance,
+        ):
+            if pd.notna(condition):
+                df.loc[block_idx, "block_condition"] = condition
 
     return df[df["block_condition"].notna()].copy()
 
@@ -437,6 +524,7 @@ def prepare_biased_blocks(
     short_duration_value: Any = SHORT_DURATION_VALUE,
     rightward_ild_sign: int = 1,
     min_direction_imbalance: float = 0.0,
+    max_unbiased_imbalance: float = DEFAULT_UNBIASED_IMBALANCE,
     keep_only_animals_with_biased_sessions: bool = True,
     psychometric_l2: float = PSYCHOMETRIC_L2,
 ) -> dict[str, Any]:
@@ -469,6 +557,7 @@ def prepare_biased_blocks(
         short_duration_value=short_duration_value,
         rightward_ild_sign=rightward_ild_sign,
         min_direction_imbalance=min_direction_imbalance,
+        max_unbiased_imbalance=max_unbiased_imbalance,
     )
 
     summary_cols = [
@@ -495,6 +584,7 @@ def prepare_biased_blocks(
         "fcfg": fcfg,
         "style": style,
         "psychometric_l2": float(psychometric_l2),
+        "max_unbiased_imbalance": float(max_unbiased_imbalance),
     }
 
 
