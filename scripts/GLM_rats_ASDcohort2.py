@@ -3,7 +3,8 @@ import os
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-os.environ.setdefault("MPLCONFIGDIR", str(SCRIPT_DIR / ".matplotlib"))
+ROOT = SCRIPT_DIR.parent
+os.environ.setdefault("MPLCONFIGDIR", str(ROOT / ".matplotlib"))
 conda_r_home = Path(os.environ.get("CONDA_PREFIX", "")) / "lib" / "R"
 if conda_r_home.is_dir():
     os.environ["R_HOME"] = str(conda_r_home)
@@ -38,7 +39,7 @@ print("✅ Loaded R packages: lme4, stats, MuMIn")
 LINE = "CNTNAP2"   # or "SHANK3"
 COHORT = "cohort2" # or "cohort1", etc
 
-BASE_DATA_DIR = SCRIPT_DIR / "DataFiles"
+BASE_DATA_DIR = ROOT / "DataFiles"
 
 LINE_ROOTS = {
      ("CNTNAP2", "cohort2"): "CNTNAP2_cohort2",

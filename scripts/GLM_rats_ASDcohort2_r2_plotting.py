@@ -6,7 +6,8 @@ from pathlib import Path
 import pickle
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-os.environ.setdefault("MPLCONFIGDIR", str(SCRIPT_DIR / ".matplotlib"))
+ROOT = SCRIPT_DIR.parent
+os.environ.setdefault("MPLCONFIGDIR", str(ROOT / ".matplotlib"))
 conda_r_home = Path(os.environ.get("CONDA_PREFIX", "")) / "lib" / "R"
 if conda_r_home.is_dir():
     os.environ["R_HOME"] = str(conda_r_home)
@@ -20,7 +21,7 @@ import seaborn as sns
 
 
 GROUP_NAMES = ["WT", "HET", "HOM"]
-DEFAULT_RESULTS_ROOT = SCRIPT_DIR / "DataFiles" / "CNTNAP2_cohort2"
+DEFAULT_RESULTS_ROOT = ROOT / "DataFiles" / "CNTNAP2_cohort2"
 
 
 def outcome_label(bundle):

@@ -8,9 +8,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-ROOT = "/Users/mafaldavalente/Documents/Mafalda_analysis"
+ROOT = Path(__file__).resolve().parent.parent
 os.chdir(ROOT)
-sys.path.insert(0, ROOT)
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from datasets import load_dataset_selections, load_line_across_cohorts
 import Helpers.DataHelpers as DataHelpers

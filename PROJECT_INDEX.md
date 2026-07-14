@@ -55,10 +55,13 @@ Folder: plotting/GroupComparison/
   - plot_old_vs_new_jnd_scatter(...)  (returns fig; no plt.show)
 
 ## “Runner” scripts (don’t reuse directly; they call the modules above and some will be legacy soon after being improved)
-- GroupComparison.py
+Folder: scripts/
 - Across_sessions.py
-- DailyMerge.py / DailyPlots.py
-- GLM_rats_ASDcohort2.py / .ipynb
+- DailyPlots.py
+- GLM_rats_ASDcohort2.py
+- GLM_rats_ASDcohort2_glmmTMB.py
+- GLM_rats_ASDcohort2_r2_plotting.py
+- GLM_rats_genotype_cohort_inference_glmmTMB.py
 - make_fig1.py
 - histograms_timings.py, QQplots.py, psy_param_all.py, etc.
 

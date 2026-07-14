@@ -10,7 +10,8 @@ from datetime import datetime
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-os.environ.setdefault("MPLCONFIGDIR", str(SCRIPT_DIR / ".matplotlib"))
+ROOT = SCRIPT_DIR.parent
+os.environ.setdefault("MPLCONFIGDIR", str(ROOT / ".matplotlib"))
 conda_r_home = Path(os.environ.get("CONDA_PREFIX", "")) / "lib" / "R"
 if conda_r_home.is_dir():
     os.environ["R_HOME"] = str(conda_r_home)
@@ -28,7 +29,7 @@ import Helpers.DataHelpers as DataHelpers
 LINE = "CNTNAP2"   # or "SHANK3"
 COHORT = "cohort2" # or "cohort1", etc
 
-BASE_DATA_DIR = str(SCRIPT_DIR / "DataFiles")
+BASE_DATA_DIR = str(ROOT / "DataFiles")
 
 DATASET_DIR_ALIASES = {
      ("CNTNAP2", "cohort1"): "CNTNAP2_cohort1",
