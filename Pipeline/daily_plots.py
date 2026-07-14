@@ -10,8 +10,8 @@ import numpy as np
 import pandas as pd
 
 import Helpers.DataHelpers as DataHelpers
-import Psychometric
-from DailyMerge import get_base_dir
+from analysis import psychometric as Psychometric
+from analysis.daily_merge import get_base_dir
 
 
 ROOT = Path(__file__).resolve().parents[1]

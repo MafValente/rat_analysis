@@ -11,7 +11,7 @@ ROOT = "/Users/mafaldavalente/Documents/Mafalda_analysis"
 os.chdir(ROOT)
 sys.path.insert(0, ROOT)
 
-from datasets import load_dataset_selections, load_line_across_cohorts
+from analysis.datasets import load_dataset_selections, load_line_across_cohorts
 from GroupComparison.config import (
     ViewSpec, FilterConfig, PlotStyle, GroupComparisonConfig,
     OverlaySpec,

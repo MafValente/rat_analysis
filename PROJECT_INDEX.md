@@ -1,7 +1,7 @@
 # Mafalda_analysis – reusable code map
 
 ## Core reusable modules (import these)
-- datasets.py
+- analysis/datasets.py
   - DatasetSpec(...)
   - resolve_data_dir(spec)
 
@@ -22,7 +22,7 @@
 - Helpers/ (package)
   - DataHelpers.py (prepare_data, restrict_subjects, shift_ILD_for_ABL50, overlays helpers, etc.)
 
-- Psychometric.py
+- analysis/psychometric.py
   - compute_psychometrics_by_ABL
   - fit_and_plot_psychometric
 

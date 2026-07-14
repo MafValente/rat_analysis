@@ -385,7 +385,7 @@ def _animal_sort_key(value):
 
 
 def _compute_params_from_df(df: pd.DataFrame, *, skip_abls: Sequence[int] = (50,)) -> pd.DataFrame:
-    import Psychometric
+    from analysis import psychometric as Psychometric
 
     rows = []
     if df is None or df.empty:
@@ -429,7 +429,7 @@ def _compute_jnd_from_df(
     skip_abl: int = 50,
     allowed_abls: Sequence[int] | None = None,
 ) -> pd.DataFrame:
-    import Psychometric
+    from analysis import psychometric as Psychometric
 
     if df is None or df.empty:
         return pd.DataFrame(columns=["animal", "animal_key", "ABL", "JND"])

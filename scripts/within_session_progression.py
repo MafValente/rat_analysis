@@ -13,7 +13,7 @@ os.chdir(ROOT)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from datasets import load_dataset_selections, load_line_across_cohorts
+from analysis.datasets import load_dataset_selections, load_line_across_cohorts
 import Helpers.DataHelpers as DataHelpers
 
 

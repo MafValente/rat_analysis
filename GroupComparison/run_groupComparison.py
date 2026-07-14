@@ -10,7 +10,7 @@ ROOT = "/Users/mafaldavalente/Documents/Mafalda_analysis"
 os.chdir(ROOT)
 sys.path.insert(0, ROOT)
 
-from datasets import dataset_key, load_line_across_cohorts, load_dataset_selections
+from analysis.datasets import dataset_key, load_line_across_cohorts, load_dataset_selections
 from GroupComparison.config import (
     ViewSpec, FilterConfig, PlotStyle, GroupComparisonConfig,
     OverlaySpec, JNDOverlaySpec,

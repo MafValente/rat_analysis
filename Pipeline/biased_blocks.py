@@ -12,7 +12,7 @@ from matplotlib.lines import Line2D
 from scipy.optimize import minimize
 
 import Helpers.DataHelpers as DataHelpers
-import Psychometric
+from analysis import psychometric as Psychometric
 from GroupComparison.config import FilterConfig, GroupComparisonConfig, OverlaySpec, PlotStyle, ViewSpec
 from GroupComparison.layouts import plot_abls_4x3
 from GroupComparison.plots import apply_50_tick_labels

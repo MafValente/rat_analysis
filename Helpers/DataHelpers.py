@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 from datetime import datetime
 import os
-import Psychometric
+from analysis import psychometric as Psychometric
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import norm

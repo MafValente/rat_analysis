@@ -4,7 +4,7 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-import Psychometric 
+from analysis import psychometric as Psychometric 
 import Helpers.DataHelpers as DataHelpers
 from matplotlib.ticker import MaxNLocator
 
@@ -477,4 +477,3 @@ sessions_ok, report, excluded, df_clean = DataHelpers.filter_sessions_with_histo
 print("Excluded sessions:")
 for line in report:
     print("-", line)
-

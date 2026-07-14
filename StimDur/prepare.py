@@ -7,7 +7,7 @@ import pandas as pd
 
 from StimDur.config import FilterConfig, StimDurComparisonConfig, ViewSpec, StimDurSpec
 
-import Psychometric
+from analysis import psychometric as Psychometric
 import Helpers.DataHelpers as DataHelpers
 
 

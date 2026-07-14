@@ -8,7 +8,7 @@ import pandas as pd
 from matplotlib.ticker import MaxNLocator
 
 import Helpers.DataHelpers as DataHelpers
-from DailyMerge import get_base_dir
+from analysis.daily_merge import get_base_dir
 
 
 def subject_id_from_file(subject_file: str) -> str:

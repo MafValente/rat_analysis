@@ -8,7 +8,7 @@ import pickle
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from datasets import dataset_key, load_dataset_selections
+from analysis.datasets import dataset_key, load_dataset_selections
 from GroupComparison.config import (
     FilterConfig,
     GroupComparisonConfig,

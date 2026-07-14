@@ -9,7 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 
-import Psychometric
+from analysis import psychometric as Psychometric
 import Helpers.DataHelpers as DataHelpers  # your file
 
 

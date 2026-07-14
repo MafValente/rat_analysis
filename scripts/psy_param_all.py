@@ -8,7 +8,7 @@ import pickle
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-from Psychometric import compute_psychometrics_by_ABL  
+from analysis.psychometric import compute_psychometrics_by_ABL  
 from scipy.optimize import curve_fit
 import Helpers.DataHelpers as DataHelpers
 

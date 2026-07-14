@@ -9,7 +9,7 @@ from .config import ViewSpec, FilterConfig, GroupComparisonConfig
 
 import os
 os.chdir("/Users/mafaldavalente/Documents/Mafalda_analysis")  # keep your existing pattern
-import Psychometric
+from analysis import psychometric as Psychometric
 import Helpers.DataHelpers as DataHelpers
 
 
