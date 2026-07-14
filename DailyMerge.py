@@ -29,6 +29,8 @@ LINE_ROOTS = {
     ("CNTNAP2", "cohort3"): "CNTNAP2_cohort3",
     ("CNTNAP2", "cohort4"): "CNTNAP2_cohort4",
     ("SHANK3",  "cohort1"): "SHANK3_cohort1",
+    ("SHANK3",  "cohort2"): "SHANK3_cohort2",
+    ("Stakes",  "cohort2"): "Stakes_cohort2",
     # add more as needed
 }
 
@@ -82,7 +84,11 @@ def get_animals_for_cohort(line="CNTNAP2", cohort="cohort2", rat=None):
 
     animals = [
         entry for entry in sorted(os.listdir(base_dir))
-        if os.path.isdir(os.path.join(base_dir, entry)) and entry.startswith("ASD")
+        if (
+            os.path.isdir(os.path.join(base_dir, entry))
+            and not entry.startswith(".")
+            and not entry.startswith("__")
+        )
     ]
     return animals
 
@@ -544,6 +550,15 @@ import pandas as pd
 
 model_file = None
 
+
+def _is_merged_subject_file(filename):
+    return (
+        filename.startswith("merged_")
+        and filename.endswith(".csv")
+        and filename != "merged_all_subjects.csv"
+        and "setup" not in filename
+    )
+
 def merge_subject_files_with_model(line="CNTNAP2", cohort="cohort2",
                                    model_file=None,
                                    output_file=None):
@@ -573,7 +588,7 @@ def merge_subject_files_with_model(line="CNTNAP2", cohort="cohort2",
     if model_file is None:
         available_merged_files = sorted(
             f for f in os.listdir(base_dir)
-            if f.startswith("merged_AS") and f.endswith(".csv") and "setup" not in f
+            if _is_merged_subject_file(f)
         )
         if not available_merged_files:
             print("❌ No merged subject files found to use as model.")
@@ -591,10 +606,10 @@ def merge_subject_files_with_model(line="CNTNAP2", cohort="cohort2",
     print(f"📘 Using model file '{os.path.basename(model_path)}' with {len(model_columns)} columns.")
 
     # --- find other subject merged files ---
-    all_files = [
+    all_files = sorted(
         f for f in os.listdir(base_dir)
-        if f.startswith("merged_AS") and f.endswith(".csv") and "setup" not in f
-    ]
+        if _is_merged_subject_file(f)
+    )
     if not all_files:
         print("⚠️ No merged subject files found.")
         return None
@@ -649,7 +664,7 @@ def merge_subject_files_with_model(line="CNTNAP2", cohort="cohort2",
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--line",   choices=["CNTNAP2", "SHANK3"], default="CNTNAP2")
+    parser.add_argument("--line", default="CNTNAP2")
     parser.add_argument("--cohort", default="cohort2")
     parser.add_argument("--rat", help="Optional subject ID, e.g. ASD0007. If omitted, process all rats in the cohort.")
     parser.add_argument(
@@ -658,7 +673,7 @@ if __name__ == "__main__":
         default="both",
         help=(
             "session = merge one rat's raw files\n"
-            "animals     = merge all merged_ASDXXXX into merged_all_subjects\n"
+            "animals     = merge all merged_<animal> files into merged_all_subjects\n"
             "both    = do both steps"
         ),
     )
