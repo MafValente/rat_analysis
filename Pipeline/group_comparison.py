@@ -460,6 +460,7 @@ def plot_flexible_groupcomparison(
     bundle: dict[str, Any],
     views: list[ViewSpec],
     layout: str = "abls_4x3",
+    cfg: GroupComparisonConfig | None = None,
     show: bool = True,
 ) -> dict[str, Any]:
     prepared = bundle["prepared"]
@@ -467,7 +468,7 @@ def plot_flexible_groupcomparison(
     jnd_indiv_by_view = bundle["jnd_indiv_by_view"]
     overlay = bundle["overlay"]
     jnd_overlay = bundle["jnd_overlay"]
-    cfg = bundle["cfg"]
+    cfg = cfg or bundle["cfg"]
     style = bundle["style"]
     view_colors = bundle["view_colors"]
     view_styles = bundle["view_styles"]

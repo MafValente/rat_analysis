@@ -61,10 +61,12 @@ def plot_views_3x3(
         style_axes(ax_psy, style, f"{vn} — Psychometric", "ILD (dB)", "P(Left)")
 
         ax_rt.set_xlim(*cfg.xlim_abs)
+        ax_rt.set_ylim(*cfg.ylim_rt)
         ax_mt.set_xlim(*cfg.xlim_sym)
+        ax_mt.set_ylim(*cfg.ylim_mt)
         ax_psy.set_xlim(*cfg.xlim_sym)
-        apply_50_tick_labels(ax_mt)
-        apply_50_tick_labels(ax_psy)
+        apply_50_tick_labels(ax_mt, cfg.xlim_sym)
+        apply_50_tick_labels(ax_psy, cfg.xlim_sym)
 
         # JND inset colored by ABL (matches curve colors)
         if add_jnd_inset:
@@ -140,10 +142,12 @@ def plot_abls_4x3(
         style_axes(ax_psy, style, f"ABL {abl} — Psychometric", "ILD (dB)", "P(Left)")
 
         ax_rt.set_xlim(*cfg.xlim_abs)
+        ax_rt.set_ylim(*cfg.ylim_rt)
         ax_mt.set_xlim(*cfg.xlim_sym)
+        ax_mt.set_ylim(*cfg.ylim_mt)
         ax_psy.set_xlim(*cfg.xlim_sym)
-        apply_50_tick_labels(ax_mt)
-        apply_50_tick_labels(ax_psy)
+        apply_50_tick_labels(ax_mt, cfg.xlim_sym)
+        apply_50_tick_labels(ax_psy, cfg.xlim_sym)
 
     # legend = views
     handles = [
