@@ -164,7 +164,7 @@ def fit_and_plot_psychometric(xData, yData, model,
         ax.scatter(xData, yData, color="k", label="Data")
         ax.plot(xx, yy, "r-", label=f"Fit ({model})")
         ax.set_xlabel("ILD")
-        ax.set_ylabel("Proportion Left")
+        ax.set_ylabel("Proportion Right")
         ax.set_ylim(0, 1)
         ax.legend()
 
@@ -254,4 +254,3 @@ def compute_psychometrics_by_ABL(df_last, model="my_psycho", min_ilds_for_fit=4)
         }
 
     return results
-
