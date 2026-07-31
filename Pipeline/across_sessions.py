@@ -5,6 +5,8 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from matplotlib.ticker import MaxNLocator
 
 import Helpers.DataHelpers as DataHelpers
@@ -32,13 +34,43 @@ def prepare_across_sessions_data(
     df: pd.DataFrame,
     *,
     training_level: int | None = 16,
+    training_level_min: int | None = None,
     training_level_max: int | None = None,
+    abl_filter: int | float | list[int | float] | tuple[int | float, ...] | None = None,
+    apply_abl_fixes: bool = True,
+    normalize_stakes_abl: bool = False,
+    normalize_stakes_sound_ramp: bool = False,
 ) -> dict[str, Any]:
-    df = DataHelpers.prepare_data(df.copy(), session_col="session", trial_col="trial")
-    if training_level_max is not None:
-        df = df[pd.to_numeric(df["training_level"], errors="coerce") < training_level_max].copy()
-    elif training_level is not None:
-        df = df[df["training_level"] == training_level].copy()
+    df = DataHelpers.prepare_data(
+        df.copy(),
+        session_col="session",
+        trial_col="trial",
+        apply_abl_fixes=apply_abl_fixes,
+    )
+    if normalize_stakes_abl:
+        df = DataHelpers.normalize_stakes_abl(df)
+    if normalize_stakes_sound_ramp:
+        normalize_ramp = getattr(DataHelpers, "normalize_stakes_sound_ramp", None)
+        if normalize_ramp is not None:
+            df = normalize_ramp(df)
+        elif "sound_ramp_time" in df.columns:
+            ramp = pd.to_numeric(df["sound_ramp_time"], errors="coerce")
+            df["sound_ramp_time"] = ramp.fillna(0.005)
+    training_num = pd.to_numeric(df["training_level"], errors="coerce")
+    if training_level is not None:
+        df = df[training_num == training_level].copy()
+    else:
+        if training_level_min is not None:
+            df = df[training_num >= training_level_min].copy()
+            training_num = pd.to_numeric(df["training_level"], errors="coerce")
+        if training_level_max is not None:
+            df = df[training_num < training_level_max].copy()
+
+    if abl_filter is not None and "ABL" in df.columns:
+        abl_values = abl_filter if isinstance(abl_filter, (list, tuple, set)) else [abl_filter]
+        abl_num = pd.to_numeric(df["ABL"], errors="coerce")
+        wanted = pd.to_numeric(pd.Series(list(abl_values)), errors="coerce").dropna().tolist()
+        df = df[abl_num.isin(wanted)].copy()
 
     df_valid = df[df["trial_is_repeat"] == False].copy()
 
@@ -164,7 +196,29 @@ def load_change_regions(
     else:
         close_fig = False
 
-    regions = DataHelpers.shade_change_regions_from_csv(ax, str(path), subject_id)
+    try:
+        regions = DataHelpers.shade_change_regions_from_csv(ax, str(path), subject_id)
+    except ValueError as exc:
+        if "Could not infer session range from Axes" not in str(exc):
+            raise
+        merged_path = data_dir / f"merged_{subject_id}.csv"
+        if not merged_path.exists():
+            if close_fig:
+                plt.close(ax.figure)
+            return None
+        merged_df = pd.read_csv(merged_path, usecols=["session"])
+        session_vals = pd.to_numeric(merged_df["session"], errors="coerce").dropna()
+        if session_vals.empty:
+            if close_fig:
+                plt.close(ax.figure)
+            return None
+        regions = DataHelpers.shade_change_regions_from_csv(
+            ax,
+            str(path),
+            subject_id,
+            session_min=int(session_vals.min()),
+            session_max=int(session_vals.max()),
+        )
     if close_fig:
         plt.close(ax.figure)
     return regions
@@ -173,6 +227,51 @@ def load_change_regions(
 def _draw_regions(ax, regions):
     if regions is not None:
         DataHelpers.draw_regions(ax, regions, alpha=1)
+
+
+def _region_legend_handles(regions):
+    if not regions:
+        return []
+
+    handles = []
+    used_labels = set()
+    for region in regions:
+        label = region.get("label")
+        if not label or label in used_labels:
+            continue
+        if region.get("mode") == "line":
+            handles.append(
+                Line2D(
+                    [0],
+                    [0],
+                    color=(region.get("color") or "0.3"),
+                    linestyle="--",
+                    linewidth=1.5,
+                    label=label,
+                )
+            )
+        else:
+            handles.append(
+                Patch(
+                    facecolor=region.get("color"),
+                    edgecolor=region.get("color"),
+                    alpha=float(region.get("alpha", 1.0)),
+                    label=label,
+                )
+            )
+        used_labels.add(label)
+    return handles
+
+
+def _add_region_legend(ax, regions, *, loc="upper right", fontsize=None, title="Changes"):
+    region_handles = _region_legend_handles(regions)
+    if not region_handles:
+        return
+    existing_legend = ax.get_legend()
+    legend = ax.legend(handles=region_handles, loc=loc, fontsize=fontsize, title=title, frameon=False)
+    if existing_legend is not None:
+        ax.add_artist(existing_legend)
+    ax.add_artist(legend)
 
 
 def plot_trial_counts(
@@ -216,6 +315,7 @@ def plot_trial_counts(
     _draw_regions(ax, regions)
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.legend(loc="upper center")
+    _add_region_legend(ax, regions, loc="upper right", title="Change Points")
     ax.set_xlabel("Session")
     ax.set_ylabel("#trials")
     fig.tight_layout()
@@ -271,6 +371,7 @@ def plot_across_sessions_summary(
         ax.set_title(title)
 
     axes[0, 0].legend()
+    _add_region_legend(axes[0, 0], regions, loc="upper right", title="Change Points")
     axes[0, 2].set_ylim(0.5, 1)
 
     bias_summary = prepared["bias_summary"]
@@ -376,6 +477,7 @@ def plot_across_sessions_combined(
     _draw_regions(ax_counts, regions)
     ax_counts.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax_counts.legend(loc="upper center", fontsize=legend_fs)
+    _add_region_legend(ax_counts, regions, loc="upper right", fontsize=legend_fs, title="Change Points")
     ax_counts.set_xlabel("Session", fontsize=label_fs)
     ax_counts.set_ylabel("#trials", fontsize=label_fs)
     ax_counts.set_title("Trial counts", fontsize=title_fs)

@@ -85,6 +85,19 @@ def _normalize_meta(meta: pd.DataFrame, cohort: str, line: str) -> pd.DataFrame:
     return meta[keep].drop_duplicates(subset=["animal", "cohort"])
 
 
+def _normalize_experimenter_value(value):
+    if pd.isna(value):
+        return value
+    text = str(value).strip().upper()
+    if not text:
+        return pd.NA
+    if text.endswith("MV"):
+        return "MV"
+    if text.endswith("HY"):
+        return "HY"
+    return text
+
+
 def load_line_across_cohorts(
     *,
     line: str,
@@ -119,6 +132,8 @@ def load_line_across_cohorts(
         df["animal"] = df["animal"].astype(str).str.strip()
         df["cohort"] = cohort
         df["line"] = line
+        if "experimenter" in df.columns:
+            df["experimenter"] = df["experimenter"].map(_normalize_experimenter_value)
         df_parts.append(df)
 
         meta_path = os.path.join(data_dir, meta_file)

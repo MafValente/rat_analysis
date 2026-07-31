@@ -340,6 +340,20 @@ def _apply_rt_value_rules(merged_df, rt_value_edits):
     return out
 
 
+def _normalize_stakes_abl_from_ild(df, *, line=None):
+    """Apply Stakes-specific ABL and ramp normalization during merge."""
+    if line != "Stakes":
+        return df
+    out = DataHelpers.normalize_stakes_abl(df)
+    normalize_ramp = getattr(DataHelpers, "normalize_stakes_sound_ramp", None)
+    if normalize_ramp is not None:
+        out = normalize_ramp(out)
+    elif "sound_ramp_time" in out.columns:
+        ramp = pd.to_numeric(out["sound_ramp_time"], errors="coerce")
+        out["sound_ramp_time"] = ramp.fillna(0.005)
+    return out
+
+
 def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2", session_edits=None, rt_value_edits=None):
 
     """
@@ -436,6 +450,7 @@ def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2",
                 isshort_col="is_short_sound",
                 long_value=6000,
             )
+            df = _normalize_stakes_abl_from_ild(df, line=line)
 
             df["__source_file"] = _normalize_source_label(file)
             df["__session_sort_key"] = DataHelpers._infer_file_date(filepath)  # <-- now from name out_YYMMDD
@@ -637,6 +652,7 @@ def merge_subject_files_with_model(line="CNTNAP2", cohort="cohort2",
             path = os.path.join(base_dir, f)
             df = pd.read_csv(path)
             df = df.reindex(columns=all_columns)
+            df = _normalize_stakes_abl_from_ild(df, line=line)
             dfs.append(df)
             print(f"✅ Added {f} ({len(df)} rows)")
         except Exception as e:

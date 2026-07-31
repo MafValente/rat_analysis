@@ -1,0 +1,89 @@
+Papermill / notebook follow-ups
+Date: 2026-07-21
+
+Context
+- True notebook execution for `notebooks/ASD/02_daily_animal_review.ipynb` is running through papermill.
+- Current warnings are not blocking local execution, but they should be cleaned up to avoid future breakage and reduce noise.
+
+1. MissingIDFieldWarning from nbformat
+Warning
+- `MissingIDFieldWarning: Cell is missing an id field, this will become a hard error in future nbformat versions.`
+
+Why it matters
+- Newer notebook tooling is getting stricter about every cell having an `id`.
+- Right now nbformat is auto-fixing some notebooks, but that may stop working.
+
+What to do
+- Normalize notebook JSON so every cell has an `id`.
+- Do this first for:
+  - `notebooks/ASD/02_daily_animal_review.ipynb`
+- Then consider doing it for the other active notebooks that may be used with papermill.
+
+Safe process
+- Before normalization:
+  - run `python scripts/check_notebook_markdown_drift.py notebooks/ASD/02_daily_animal_review.ipynb`
+- Normalize the notebook in a way that only adds missing cell ids.
+- After normalization:
+  - rerun `python scripts/check_notebook_markdown_drift.py notebooks/ASD/02_daily_animal_review.ipynb`
+  - inspect `git diff -- notebooks/ASD/02_daily_animal_review.ipynb`
+- Goal:
+  - no markdown/title/comment drift
+  - only metadata/cell-id level changes unless intentionally editing a code cell
+
+Possible implementation options
+- Use nbformat normalization if available in the environment.
+- Or write a tiny repo script that:
+  - loads the notebook JSON
+  - adds ids only to cells missing them
+  - writes the notebook back without changing markdown source text
+
+2. IPKernelApp TCP without encryption warning
+Warning
+- `Kernel is running over TCP without encryption. All communication (including code and outputs) is sent in plain text...`
+
+Why it matters
+- On a local single-user laptop, this is usually low risk and mostly noise.
+- On shared machines or remote hosts, it is more important.
+
+Current interpretation
+- For current local papermill runs, treat this as non-blocking.
+
+What to do
+- Check whether papermill / jupyter can be configured to use a local IPC transport instead of TCP for this workflow.
+- If not worth the complexity for local runs, document that this warning is acceptable on this machine and revisit only if execution moves to a shared environment.
+
+Possible investigation
+- Look into nbclient / jupyter_client kernel manager transport options.
+- Check whether the launcher can explicitly prefer IPC on macOS in this environment.
+
+3. Environment cleanup for notebook execution
+Observed
+- Matplotlib cache warnings appear because default user cache/config folders are not writable in this Codex environment.
+- IPython also warns about a non-writable user directory.
+
+What to do
+- Optional cleanup: set repo-local env vars in the batch launcher for:
+  - `MPLCONFIGDIR`
+  - `IPYTHONDIR`
+- This is mainly to reduce warning noise in automated runs.
+
+4. Batch execution reliability
+Observed
+- A pandas shape assumption in the optional session exclusion helper caused a failure for one animal and was patched.
+
+What to do
+- Keep an eye out for other notebook cells that are "interactive but optional" and may need defensive handling for full-cohort runs.
+- Consider whether the optional session exclusion cell should:
+  - stay in the batch path
+  - or be guarded with a parameter like `RUN_OPTIONAL_EXCLUSIONS = True/False`
+
+5. Good default verification after notebook edits
+- Run:
+  - `python scripts/check_notebook_markdown_drift.py notebooks/ASD/02_daily_animal_review.ipynb`
+- Then inspect:
+  - `git diff -- notebooks/ASD/02_daily_animal_review.ipynb`
+
+Suggested priority
+1. Add missing cell ids to the daily review notebook.
+2. Optionally reduce launcher warning noise with repo-local `MPLCONFIGDIR` and `IPYTHONDIR`.
+3. Decide whether the TCP encryption warning needs any action beyond documentation for local use.

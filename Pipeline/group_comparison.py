@@ -107,11 +107,14 @@ def make_selector(
     lines=None,
     cohorts=None,
     dataset_keys=None,
+    experimenters=None,
+    experimentor=None,
 ):
     genotype_set = _as_set(genotypes)
     line_set = _as_set(lines)
     cohort_set = _as_set(cohorts)
     dataset_key_set = _as_set(dataset_keys)
+    experimenter_set = _as_set(experimenters if experimenters is not None else experimentor)
 
     def _selector(df: pd.DataFrame) -> pd.DataFrame:
         mask = pd.Series(True, index=df.index)
@@ -123,6 +126,10 @@ def make_selector(
             mask &= df["cohort"].astype(str).str.strip().isin(cohort_set)
         if dataset_key_set is not None:
             mask &= df["dataset_key"].astype(str).str.strip().isin(dataset_key_set)
+        if experimenter_set is not None:
+            if "experimenter" not in df.columns:
+                return df.iloc[0:0].copy()
+            mask &= df["experimenter"].astype(str).str.strip().isin(experimenter_set)
         return df[mask].copy()
 
     return _selector
@@ -140,6 +147,7 @@ def build_custom_views(specs: list[dict[str, Any]]) -> list[ViewSpec]:
                     lines=spec.get("lines", spec.get("line")),
                     cohorts=spec.get("cohorts", spec.get("cohort")),
                     dataset_keys=spec.get("dataset_keys", spec.get("dataset_key")),
+                    experimenters=spec.get("experimenters", spec.get("experimentor", spec.get("experimenter"))),
                 ),
             )
         )
@@ -162,6 +170,7 @@ def build_group_views(
       - "datasets": compare datasets, optionally restricted to one or more genotypes.
       - "lines": compare lines, optionally restricted to one or more genotypes/cohorts.
       - "cohorts": compare cohorts, optionally restricted to one or more genotypes/lines.
+      - "experimentor": compare experimenter groups (for example MV vs HY).
       - "custom": use custom_specs directly.
 
     split_by for comparison="genotypes":
@@ -174,6 +183,8 @@ def build_group_views(
         if not custom_specs:
             raise ValueError("comparison='custom' requires custom_specs.")
         return build_custom_views(custom_specs)
+
+    comparison = "experimentor" if comparison == "experimenter" else comparison
 
     df_meta = df.dropna(subset=["dataset_key"]).copy()
     available_genotypes = [g for g in ("wt", "het", "hom") if g in set(df_meta.get("genotype", pd.Series(dtype=str)).astype(str))]
@@ -190,6 +201,11 @@ def build_group_views(
         cohort_list = list(cohorts)
 
     dataset_names = sorted(df_meta["dataset_key"].dropna().astype(str).unique(), key=dataset_sort_key)
+    experimenter_list = (
+        sorted(df_meta["experimenter"].dropna().astype(str).str.strip().unique())
+        if "experimenter" in df_meta.columns
+        else []
+    )
     views: list[ViewSpec] = []
 
     if comparison == "genotypes":
@@ -232,8 +248,23 @@ def build_group_views(
             label = cohort if genotypes is None else f"{cohort} {'/'.join(map(str, genotype_list))}"
             views.append(ViewSpec(label, make_selector(genotypes=genotypes, lines=lines, cohorts=cohort)))
 
+    elif comparison == "experimentor":
+        for experimenter in experimenter_list:
+            label = experimenter if genotypes is None else f"{experimenter} {'/'.join(map(str, genotype_list))}"
+            views.append(
+                ViewSpec(
+                    label,
+                    make_selector(
+                        genotypes=genotypes,
+                        lines=lines,
+                        cohorts=cohorts,
+                        experimenters=experimenter,
+                    ),
+                )
+            )
+
     else:
-        raise ValueError("comparison must be one of: genotypes, datasets, lines, cohorts, custom.")
+        raise ValueError("comparison must be one of: genotypes, datasets, lines, cohorts, experimentor/experimenter, custom.")
 
     nonempty_views = []
     for view in views:
@@ -301,6 +332,7 @@ def summarize_views(df: pd.DataFrame, views: list[ViewSpec]) -> pd.DataFrame:
                 "lines": ", ".join(sorted(sub["line"].dropna().astype(str).unique())) if "line" in sub else "",
                 "cohorts": ", ".join(sorted(sub["cohort"].dropna().astype(str).unique())) if "cohort" in sub else "",
                 "genotypes": ", ".join(sorted(sub["genotype"].dropna().astype(str).unique())) if "genotype" in sub else "",
+                "experimentor": ", ".join(sorted(sub["experimenter"].dropna().astype(str).unique())) if "experimenter" in sub else "",
             }
         )
     return pd.DataFrame(rows)

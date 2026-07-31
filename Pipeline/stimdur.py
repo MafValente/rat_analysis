@@ -133,12 +133,22 @@ def _as_set(values):
     return {str(value) for value in values}
 
 
-def make_selector(*, genotypes=None, lines=None, cohorts=None, dataset_keys=None, animals=None):
+def make_selector(
+    *,
+    genotypes=None,
+    lines=None,
+    cohorts=None,
+    dataset_keys=None,
+    animals=None,
+    experimenters=None,
+    experimentor=None,
+):
     genotype_set = _as_set(genotypes)
     line_set = _as_set(lines)
     cohort_set = _as_set(cohorts)
     dataset_key_set = _as_set(dataset_keys)
     animal_set = _as_set(animals)
+    experimenter_set = _as_set(experimenters if experimenters is not None else experimentor)
 
     def _selector(df: pd.DataFrame) -> pd.DataFrame:
         mask = pd.Series(True, index=df.index)
@@ -152,6 +162,10 @@ def make_selector(*, genotypes=None, lines=None, cohorts=None, dataset_keys=None
             mask &= df["dataset_key"].astype(str).str.strip().isin(dataset_key_set)
         if animal_set is not None:
             mask &= df["animal"].astype(str).str.strip().isin(animal_set)
+        if experimenter_set is not None:
+            if "experimenter" not in df.columns:
+                return df.iloc[0:0].copy()
+            mask &= df["experimenter"].astype(str).str.strip().isin(experimenter_set)
         return df[mask].copy()
 
     return _selector
@@ -170,6 +184,7 @@ def build_custom_views(custom_specs: list[dict[str, Any]]) -> list[ViewSpec]:
                     cohorts=spec.get("cohort", spec.get("cohorts")),
                     dataset_keys=spec.get("dataset_key", spec.get("dataset_keys")),
                     animals=spec.get("animal", spec.get("animals")),
+                    experimenters=spec.get("experimenters", spec.get("experimentor", spec.get("experimenter"))),
                 ),
             )
         )
@@ -186,6 +201,8 @@ def build_stimdur_views(
     cohorts: list[str] | tuple[str, ...] | None = None,
     custom_specs: list[dict[str, Any]] | None = None,
 ) -> list[ViewSpec]:
+    comparison = "experimentor" if comparison == "experimenter" else comparison
+
     if comparison == "custom":
         if not custom_specs:
             raise ValueError("comparison='custom' requires custom_specs.")
@@ -200,6 +217,11 @@ def build_stimdur_views(
         line_list = list(lines) if lines is not None else sorted(df_meta["line"].dropna().astype(str).unique())
         cohort_list = list(cohorts) if cohorts is not None else sorted(df_meta["cohort"].dropna().astype(str).unique())
         dataset_names = sorted(df_meta["dataset_key"].dropna().astype(str).unique(), key=dataset_sort_key)
+        experimenter_list = (
+            sorted(df_meta["experimenter"].dropna().astype(str).str.strip().unique())
+            if "experimenter" in df_meta.columns
+            else []
+        )
         views = []
 
         if comparison == "genotypes":
@@ -233,11 +255,25 @@ def build_stimdur_views(
             for cohort in cohort_list:
                 label = cohort if genotypes is None else f"{cohort} {'/'.join(map(str, genotype_list))}"
                 views.append(ViewSpec(label, make_selector(genotypes=genotypes, lines=lines, cohorts=cohort)))
+        elif comparison == "experimentor":
+            for experimenter in experimenter_list:
+                label = experimenter if genotypes is None else f"{experimenter} {'/'.join(map(str, genotype_list))}"
+                views.append(
+                    ViewSpec(
+                        label,
+                        make_selector(
+                            genotypes=genotypes,
+                            lines=lines,
+                            cohorts=cohorts,
+                            experimenters=experimenter,
+                        ),
+                    )
+                )
         elif comparison == "animals":
             animals = sorted(df["animal"].dropna().astype(str).str.strip().unique())
             views.extend(ViewSpec(animal, make_selector(animals=animal)) for animal in animals)
         else:
-            raise ValueError("comparison must be one of: genotypes, datasets, lines, cohorts, animals, custom.")
+            raise ValueError("comparison must be one of: genotypes, datasets, lines, cohorts, experimentor/experimenter, animals, custom.")
 
     nonempty_views = [view for view in views if not view.selector(df).empty]
     if not nonempty_views:
@@ -283,6 +319,7 @@ def summarize_views(df: pd.DataFrame, views: list[ViewSpec]) -> pd.DataFrame:
                 "animals": sub["animal"].nunique() if "animal" in sub.columns else None,
                 "trials": len(sub),
                 "datasets": ", ".join(sorted(sub["dataset_key"].dropna().astype(str).unique())) if "dataset_key" in sub.columns else "",
+                "experimentor": ", ".join(sorted(sub["experimenter"].dropna().astype(str).unique())) if "experimenter" in sub.columns else "",
             }
         )
     return pd.DataFrame(rows)

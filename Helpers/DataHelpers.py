@@ -25,6 +25,7 @@ def prepare_data(
     #training_level_filter=16,
     session_col="session",   # <-- change to your real session column name
     trial_col="trial",       # <-- or trial_index if different
+    apply_abl_fixes=True,
 ):
     """
     Full data preparation pipeline:
@@ -40,17 +41,18 @@ def prepare_data(
     # ----------------------------
     # 1. ---- ABL FIXES ---------
     # ----------------------------
-    mask1 = df["training_level"] < 7
-    df.loc[mask1, "ABL"] = pd.to_numeric(df.loc[mask1, "ABL"], errors="coerce") * 2
+    if apply_abl_fixes:
+        mask1 = df["training_level"] < 7
+        df.loc[mask1, "ABL"] = pd.to_numeric(df.loc[mask1, "ABL"], errors="coerce") * 2
 
-    mask2 = df["ABL"] == 59
-    df.loc[mask2, "ABL"] = 60
+        mask2 = df["ABL"] == 59
+        df.loc[mask2, "ABL"] = 60
 
-    mask3 = df["ABL"] == 58
-    df.loc[mask3, "ABL"] = 60
+        mask3 = df["ABL"] == 58
+        df.loc[mask3, "ABL"] = 60
 
-    mask4 = (df["training_level"] == 16) & (df["ABL"] == 25)
-    df.loc[mask4, "ABL"] = 50
+        mask4 = (df["training_level"] == 16) & (df["ABL"] == 25)
+        df.loc[mask4, "ABL"] = 50
 
     # ----------------------------
     # 2. ---- FILTER BY LEVEL ----
@@ -91,6 +93,49 @@ def prepare_data(
                 df.loc[this_idx, "trial_is_repeat"] = True
 
     return df
+
+
+def normalize_stakes_abl(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Stakes-specific ABL normalization.
+
+    Stakes ABL labels should only be expanded for fully lateralized sounds.
+
+    Raw half-range labels:
+      10, 15, 20, 25
+    should become:
+      20, 30, 40, 50
+    only on trials where the sound is fully lateralized, i.e. where the ILD
+    magnitude equals twice the raw ABL value.
+
+    This preserves multi-ILD conditions that reuse the same raw ABL labels.
+    """
+    out = df.copy()
+    if "ABL" not in out.columns or "ILD" not in out.columns:
+        return out
+
+    abl = pd.to_numeric(out["ABL"], errors="coerce")
+    ild = pd.to_numeric(out["ILD"], errors="coerce").abs()
+    half_range_mask = abl.isin([10, 15, 20, 25])
+    lateralized_mask = half_range_mask & np.isclose(ild, 2 * abl, equal_nan=False)
+    out.loc[lateralized_mask, "ABL"] = abl.loc[lateralized_mask] * 2
+
+    return out
+
+
+def normalize_stakes_sound_ramp(df: pd.DataFrame, default_ramp: float = 0.005) -> pd.DataFrame:
+    """
+    Stakes-specific sound-ramp normalization.
+
+    Missing ramp values should be treated as the original 5 ms ramp.
+    """
+    out = df.copy()
+    if "sound_ramp_time" not in out.columns:
+        return out
+
+    ramp = pd.to_numeric(out["sound_ramp_time"], errors="coerce")
+    out["sound_ramp_time"] = ramp.fillna(float(default_ramp))
+    return out
 
 
 
@@ -501,7 +546,7 @@ def build_session_summary(
     bias_per_session = (
         df.groupby(["animal", "session"], observed=False)
           .apply(compute_bias, include_groups=False)
-          .rename("bias")
+          .pipe(lambda x: x if isinstance(x, pd.DataFrame) else x.to_frame("bias"))
           .reset_index()
     )
 
@@ -691,6 +736,10 @@ def shade_change_regions_from_csv(
     if "change_session" not in cp.columns:
         raise ValueError("CSV must contain a 'change_session' column (int).")
 
+    cp["change_session"] = pd.to_numeric(cp["change_session"], errors="coerce")
+    cp = cp.dropna(subset=["change_session"]).copy()
+    if cp.empty:
+        return
     cp["change_session"] = cp["change_session"].astype(int)
     cp.sort_values("change_session", inplace=True)
 
