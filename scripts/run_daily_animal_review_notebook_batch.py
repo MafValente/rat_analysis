@@ -59,6 +59,20 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional ABL filter. Pass one value or several values.",
     )
+    parser.add_argument(
+        "--sound-ramp-filter",
+        type=float,
+        nargs="+",
+        default=None,
+        help="Optional sound ramp filter in seconds. Pass one value or several values.",
+    )
+    parser.add_argument(
+        "--sound-ramp-exclude",
+        type=float,
+        nargs="+",
+        default=None,
+        help="Optional sound ramp values to exclude, in seconds.",
+    )
     parser.add_argument("--figure-dpi", type=int, default=250)
     parser.add_argument(
         "--out-dir",
@@ -129,6 +143,16 @@ def main() -> int:
             "TRAINING_LEVEL_MIN": args.training_level_min,
             "TRAINING_LEVEL_MAX": args.training_level_max,
             "ABL_FILTER": args.abl_filter[0] if args.abl_filter and len(args.abl_filter) == 1 else args.abl_filter,
+            "SOUND_RAMP_FILTER": (
+                args.sound_ramp_filter[0]
+                if args.sound_ramp_filter and len(args.sound_ramp_filter) == 1
+                else args.sound_ramp_filter
+            ),
+            "SOUND_RAMP_EXCLUDE": (
+                args.sound_ramp_exclude[0]
+                if args.sound_ramp_exclude and len(args.sound_ramp_exclude) == 1
+                else args.sound_ramp_exclude
+            ),
             "LOAD_REFERENCE": not args.no_reference,
             "SAVE_FIGURES": True,
             "OUTPUT_DIR": str(figure_dir),
@@ -143,6 +167,8 @@ def main() -> int:
                 "TRAINING_LEVEL_MIN": parameters["TRAINING_LEVEL_MIN"],
                 "TRAINING_LEVEL_MAX": parameters["TRAINING_LEVEL_MAX"],
                 "ABL_FILTER": parameters["ABL_FILTER"],
+                "SOUND_RAMP_FILTER": parameters["SOUND_RAMP_FILTER"],
+                "SOUND_RAMP_EXCLUDE": parameters["SOUND_RAMP_EXCLUDE"],
             },
         )
         pm.execute_notebook(

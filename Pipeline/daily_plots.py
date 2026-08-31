@@ -215,6 +215,27 @@ def _sem(values) -> float:
     return float(arr.std(ddof=1) / np.sqrt(arr.size))
 
 
+def _match_numeric_filter(
+    values: pd.Series,
+    targets: int | float | list[int | float] | tuple[int | float, ...] | None,
+    *,
+    atol: float = 1e-9,
+) -> pd.Series:
+    numeric = pd.to_numeric(values, errors="coerce")
+    if targets is None:
+        return pd.Series(True, index=values.index, dtype=bool)
+
+    target_list = targets if isinstance(targets, (list, tuple, set)) else [targets]
+    wanted = pd.to_numeric(pd.Series(list(target_list)), errors="coerce").dropna().to_numpy(dtype=float)
+    if wanted.size == 0:
+        return pd.Series(False, index=values.index, dtype=bool)
+
+    mask = pd.Series(False, index=values.index, dtype=bool)
+    for target in wanted:
+        mask |= np.isclose(numeric, target, atol=atol, rtol=0.0)
+    return mask
+
+
 def _apply_training_and_abl_filters(
     df: pd.DataFrame,
     *,
@@ -222,6 +243,8 @@ def _apply_training_and_abl_filters(
     training_level_min: int | None = None,
     training_level_max: int | None = None,
     abl_filter: int | float | list[int | float] | tuple[int | float, ...] | None = None,
+    sound_ramp_filter: int | float | list[int | float] | tuple[int | float, ...] | None = None,
+    sound_ramp_exclude: int | float | list[int | float] | tuple[int | float, ...] | None = None,
 ) -> pd.DataFrame:
     out = df.copy()
     training_num = pd.to_numeric(out["training_level"], errors="coerce")
@@ -236,10 +259,13 @@ def _apply_training_and_abl_filters(
             out = out[training_num < training_level_max].copy()
 
     if abl_filter is not None and "ABL" in out.columns:
-        abl_values = abl_filter if isinstance(abl_filter, (list, tuple, set)) else [abl_filter]
-        abl_num = pd.to_numeric(out["ABL"], errors="coerce")
-        wanted = pd.to_numeric(pd.Series(list(abl_values)), errors="coerce").dropna().tolist()
-        out = out[abl_num.isin(wanted)].copy()
+        out = out[_match_numeric_filter(out["ABL"], abl_filter)].copy()
+
+    if sound_ramp_filter is not None and "sound_ramp_time" in out.columns:
+        out = out[_match_numeric_filter(out["sound_ramp_time"], sound_ramp_filter)].copy()
+
+    if sound_ramp_exclude is not None and "sound_ramp_time" in out.columns:
+        out = out[~_match_numeric_filter(out["sound_ramp_time"], sound_ramp_exclude)].copy()
 
     return out
 
@@ -349,6 +375,8 @@ def prepare_daily_animal_data(
     training_level_min: int | None = None,
     training_level_max: int | None = None,
     abl_filter: int | float | list[int | float] | tuple[int | float, ...] | None = None,
+    sound_ramp_filter: int | float | list[int | float] | tuple[int | float, ...] | None = None,
+    sound_ramp_exclude: int | float | list[int | float] | tuple[int | float, ...] | None = None,
     include_long_duration: bool = True,
 ) -> dict[str, Any]:
     df = DataHelpers.prepare_data(
@@ -366,6 +394,8 @@ def prepare_daily_animal_data(
         training_level_min=training_level_min,
         training_level_max=training_level_max,
         abl_filter=abl_filter,
+        sound_ramp_filter=sound_ramp_filter,
+        sound_ramp_exclude=sound_ramp_exclude,
     )
 
     if include_long_duration:
@@ -417,6 +447,8 @@ def prepare_stakes_group_data(
     training_level_min: int | None = None,
     training_level_max: int | None = 16,
     abl_filter: int | float | list[int | float] | tuple[int | float, ...] | None = None,
+    sound_ramp_filter: int | float | list[int | float] | tuple[int | float, ...] | None = None,
+    sound_ramp_exclude: int | float | list[int | float] | tuple[int | float, ...] | None = None,
     include_long_duration: bool = True,
 ) -> dict[str, Any]:
     df = DataHelpers.prepare_data(
@@ -434,6 +466,8 @@ def prepare_stakes_group_data(
         training_level_min=training_level_min,
         training_level_max=training_level_max,
         abl_filter=abl_filter,
+        sound_ramp_filter=sound_ramp_filter,
+        sound_ramp_exclude=sound_ramp_exclude,
     )
 
     if include_long_duration:

@@ -37,6 +37,8 @@ def prepare_across_sessions_data(
     training_level_min: int | None = None,
     training_level_max: int | None = None,
     abl_filter: int | float | list[int | float] | tuple[int | float, ...] | None = None,
+    sound_ramp_filter: int | float | list[int | float] | tuple[int | float, ...] | None = None,
+    sound_ramp_exclude: int | float | list[int | float] | tuple[int | float, ...] | None = None,
     apply_abl_fixes: bool = True,
     normalize_stakes_abl: bool = False,
     normalize_stakes_sound_ramp: bool = False,
@@ -67,10 +69,31 @@ def prepare_across_sessions_data(
             df = df[training_num < training_level_max].copy()
 
     if abl_filter is not None and "ABL" in df.columns:
-        abl_values = abl_filter if isinstance(abl_filter, (list, tuple, set)) else [abl_filter]
         abl_num = pd.to_numeric(df["ABL"], errors="coerce")
-        wanted = pd.to_numeric(pd.Series(list(abl_values)), errors="coerce").dropna().tolist()
-        df = df[abl_num.isin(wanted)].copy()
+        abl_values = abl_filter if isinstance(abl_filter, (list, tuple, set)) else [abl_filter]
+        wanted = pd.to_numeric(pd.Series(list(abl_values)), errors="coerce").dropna().to_numpy(dtype=float)
+        mask = pd.Series(False, index=df.index, dtype=bool)
+        for target in wanted:
+            mask |= np.isclose(abl_num, target, atol=1e-9, rtol=0.0)
+        df = df[mask].copy()
+
+    if sound_ramp_filter is not None and "sound_ramp_time" in df.columns:
+        ramp_num = pd.to_numeric(df["sound_ramp_time"], errors="coerce")
+        ramp_values = sound_ramp_filter if isinstance(sound_ramp_filter, (list, tuple, set)) else [sound_ramp_filter]
+        wanted = pd.to_numeric(pd.Series(list(ramp_values)), errors="coerce").dropna().to_numpy(dtype=float)
+        mask = pd.Series(False, index=df.index, dtype=bool)
+        for target in wanted:
+            mask |= np.isclose(ramp_num, target, atol=1e-9, rtol=0.0)
+        df = df[mask].copy()
+
+    if sound_ramp_exclude is not None and "sound_ramp_time" in df.columns:
+        ramp_num = pd.to_numeric(df["sound_ramp_time"], errors="coerce")
+        ramp_values = sound_ramp_exclude if isinstance(sound_ramp_exclude, (list, tuple, set)) else [sound_ramp_exclude]
+        unwanted = pd.to_numeric(pd.Series(list(ramp_values)), errors="coerce").dropna().to_numpy(dtype=float)
+        mask = pd.Series(False, index=df.index, dtype=bool)
+        for target in unwanted:
+            mask |= np.isclose(ramp_num, target, atol=1e-9, rtol=0.0)
+        df = df[~mask].copy()
 
     df_valid = df[df["trial_is_repeat"] == False].copy()
 

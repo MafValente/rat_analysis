@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from analysis.datasets import dataset_key, load_dataset_selections
+from Pipeline.biased_blocks import add_biased_block_condition
 from StimDur.config import (
     FilterConfig,
     PlotStyle,
@@ -33,6 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE_DATA_DIR = ROOT / "DataFiles"
 STIMDUR_COL = "short_duration"
 DEFAULT_STIM_DURS = [8, 15, 16, 32, 60, 64, 120, 0]
+BLOCK_CONDITION_ORDER = ("unbiased", "rightward", "leftward")
 STIMDUR_PRETTY = {
     "8": "SD = 8 ms",
     "15": "SD = 15 ms",
@@ -389,6 +391,124 @@ def prepare_stimdur_comparison(
     }
 
 
+def prepare_biased_block_stimdur_comparison(
+    *,
+    df: pd.DataFrame,
+    views: list[ViewSpec],
+    stim_durs: list[int] | tuple[int, ...] = tuple(DEFAULT_STIM_DURS),
+    stimdur_col: str = STIMDUR_COL,
+    cfg: StimDurComparisonConfig | None = None,
+    fcfg: FilterConfig | None = None,
+    style: PlotStyle | None = None,
+    stimdur_pretty: dict[str, str] | None = None,
+    stimdur_colors: dict[str, str] | None = None,
+    view_colors: dict[str, str] | None = None,
+    view_pretty: dict[str, str] | None = None,
+    biased_session_types: tuple[int, ...] = (23,),
+    block_conditions: tuple[str, ...] = BLOCK_CONDITION_ORDER,
+    rightward_ild_sign: int = 1,
+    min_direction_imbalance: float = 0.0,
+    max_unbiased_imbalance: float = 0.2,
+) -> dict[str, Any]:
+    cfg = cfg or StimDurComparisonConfig(
+        error_mode="individuals",
+        skip_psy_fits=(50,),
+        ild_shift_for_abl50=True,
+    )
+    fcfg = fcfg or FilterConfig(
+        training_min=16,
+        session_min=13,
+        drop_repeat_trials=True,
+        session_type_values=[23],
+    )
+    style = style or PlotStyle()
+    stimdur_pretty = stimdur_pretty or STIMDUR_PRETTY
+    view_pretty = view_pretty or build_view_labels(views)
+    view_colors = view_colors or build_view_colors(views)
+
+    biased_filter = FilterConfig(
+        training_min=fcfg.training_min,
+        session_min=fcfg.session_min,
+        drop_repeat_trials=fcfg.drop_repeat_trials,
+        session_type_values=list(biased_session_types),
+    )
+    df_filtered = apply_filters(df, biased_filter)
+    df_blocks = add_biased_block_condition(
+        df_filtered,
+        biased_session_types=tuple(int(x) for x in biased_session_types),
+        unbiased_rt_session_types=(),
+        short_duration_value=None,
+        rightward_ild_sign=rightward_ild_sign,
+        min_direction_imbalance=min_direction_imbalance,
+        max_unbiased_imbalance=max_unbiased_imbalance,
+    )
+
+    per_condition_filter = FilterConfig(
+        training_min=0,
+        session_min=0,
+        drop_repeat_trials=False,
+        session_type_values=None,
+    )
+    condition_bundles: dict[str, dict[str, Any]] = {}
+    condition_views: dict[str, list[ViewSpec]] = {}
+    summary_rows: list[dict[str, Any]] = []
+
+    for condition in block_conditions:
+        df_condition = df_blocks[df_blocks["block_condition"] == condition].copy()
+        available_views = [view for view in views if not view.selector(df_condition).empty]
+        if not available_views:
+            continue
+
+        condition_bundles[condition] = prepare_stimdur_comparison(
+            df=df_condition,
+            views=available_views,
+            stim_durs=stim_durs,
+            stimdur_col=stimdur_col,
+            cfg=cfg,
+            fcfg=per_condition_filter,
+            style=style,
+            stimdur_pretty=stimdur_pretty,
+            stimdur_colors=stimdur_colors,
+            view_colors=view_colors,
+            view_pretty=view_pretty,
+        )
+        condition_views[condition] = available_views
+
+        for view in available_views:
+            df_view = view.selector(df_condition)
+            summary_rows.append(
+                {
+                    "block_condition": condition,
+                    "view": view.name,
+                    "animals": df_view["animal"].nunique() if "animal" in df_view.columns else pd.NA,
+                    "trials": len(df_view),
+                }
+            )
+
+    if not condition_bundles:
+        raise ValueError("No biased-block stim-duration data remained after filtering.")
+
+    block_summary = pd.DataFrame(summary_rows)
+    if not block_summary.empty:
+        block_summary = block_summary.sort_values(["block_condition", "view"]).reset_index(drop=True)
+
+    return {
+        "df": df_blocks,
+        "df_filtered": df_filtered,
+        "condition_bundles": condition_bundles,
+        "condition_views": condition_views,
+        "block_summary": block_summary,
+        "cfg": cfg,
+        "fcfg": biased_filter,
+        "style": style,
+        "stimdur_col": stimdur_col,
+        "stim_durs": list(stim_durs),
+        "view_colors": view_colors,
+        "view_pretty": view_pretty,
+        "stimdur_pretty": stimdur_pretty,
+    }
+
+
 def plot_stimdur_comparison(
     *,
     bundle: dict[str, Any],
@@ -499,5 +619,37 @@ def plot_stimdur_comparison(
     valid_modes = {"by_view", "by_stimdur", "performance_by_view", "performance_all", "kreg_by_view", "all"}
     if plot_mode not in valid_modes:
         raise ValueError(f"plot_mode must be one of {sorted(valid_modes)}.")
+
+    return {"figures": figures, **bundle}
+
+
+def plot_biased_block_stimdur_comparison(
+    *,
+    bundle: dict[str, Any],
+    plot_mode: str = "by_view",
+    show: bool = True,
+    abls: list[int] | tuple[int, ...] = (20, 40, 60),
+    absilds: list[int] | tuple[int, ...] = (1, 2, 4, 8, 16),
+    xlim: tuple[float, float] = (0.0, 0.5),
+    debug: bool = False,
+) -> dict[str, Any]:
+    figures: dict[str, Any] = {}
+
+    for condition in BLOCK_CONDITION_ORDER:
+        condition_bundle = bundle["condition_bundles"].get(condition)
+        condition_views = bundle["condition_views"].get(condition)
+        if condition_bundle is None or not condition_views:
+            continue
+
+        figures[condition] = plot_stimdur_comparison(
+            bundle=condition_bundle,
+            views=condition_views,
+            plot_mode=plot_mode,
+            show=show,
+            abls=abls,
+            absilds=absilds,
+            xlim=xlim,
+            debug=debug,
+        )["figures"]
 
     return {"figures": figures, **bundle}

@@ -15,7 +15,7 @@ import Helpers.DataHelpers as DataHelpers
 from analysis import psychometric as Psychometric
 from GroupComparison.config import FilterConfig, GroupComparisonConfig, OverlaySpec, PlotStyle, ViewSpec
 from GroupComparison.layouts import plot_abls_4x3
-from GroupComparison.plots import apply_50_tick_labels
+from GroupComparison.plots import apply_50_tick_labels, plot_mt_on_ax, plot_psy_on_ax, plot_rt_on_ax, style_axes
 from GroupComparison.prepare import (
     apply_filters,
     compute_group_jnd_by_view,
@@ -741,6 +741,179 @@ def _plot_prepared_abls(
     return fig
 
 
+MEAN_ABL_SYNTHETIC = 999
+MEAN_ABL_TARGETS = (20, 40, 60)
+
+
+def _fit_mean_psy_curve(
+    points_df: pd.DataFrame,
+    *,
+    psychometric_l2: float,
+) -> dict[int, dict[str, Any]]:
+    if points_df.empty:
+        return {}
+    sub = points_df.sort_values("ILD").copy()
+    x = pd.to_numeric(sub["ILD"], errors="coerce").to_numpy(dtype=float)
+    y = pd.to_numeric(sub["mean"], errors="coerce").to_numpy(dtype=float)
+    finite = np.isfinite(x) & np.isfinite(y)
+    x = x[finite]
+    y = y[finite]
+    if len(x) < 4:
+        return {}
+    n_trials = np.full(len(x), 50, dtype=int)
+    try:
+        if float(psychometric_l2) > 0:
+            pars, _, xx, yy = _fit_psychometric_biased(x, y, n_trials=n_trials, l2_strength=psychometric_l2)
+        else:
+            pars, _, xx, yy = Psychometric.fit_and_plot_psychometric(
+                x, y, model="my_psycho", n_trials=n_trials, show_plot=False
+            )
+    except Exception:
+        return {}
+    return {MEAN_ABL_SYNTHETIC: {"xx": xx, "yy": yy, "pars": pars}}
+
+
+def _collapse_tables_over_abls(
+    tables: dict[str, Any],
+    *,
+    include_abls: tuple[int, ...] = MEAN_ABL_TARGETS,
+    psychometric_l2: float = PSYCHOMETRIC_L2,
+) -> dict[str, Any]:
+    include_abls = tuple(int(a) for a in include_abls)
+
+    rt_per_subj = tables.get("rt_per_subj", pd.DataFrame()).copy()
+    rt_per_subj = rt_per_subj[pd.to_numeric(rt_per_subj.get("ABL"), errors="coerce").isin(include_abls)].copy()
+    if not rt_per_subj.empty:
+        rt_per_subj = (
+            rt_per_subj.groupby(["animal", "ILD"], dropna=False)["mean_rt"]
+            .mean()
+            .rename("mean_rt")
+            .reset_index()
+        )
+        rt_per_subj["ABL"] = MEAN_ABL_SYNTHETIC
+        rt_group = (
+            rt_per_subj.groupby(["ABL", "ILD"], dropna=False)["mean_rt"]
+            .agg(mean="mean", sem=sem, n="count")
+            .reset_index()
+        )
+    else:
+        rt_per_subj = pd.DataFrame(columns=["animal", "ILD", "mean_rt", "ABL"])
+        rt_group = pd.DataFrame(columns=["ABL", "ILD", "mean", "sem", "n"])
+
+    mt_per_subj = tables.get("mt_per_subj", pd.DataFrame()).copy()
+    mt_per_subj = mt_per_subj[pd.to_numeric(mt_per_subj.get("ABL"), errors="coerce").isin(include_abls)].copy()
+    if not mt_per_subj.empty:
+        mt_per_subj = (
+            mt_per_subj.groupby(["animal", "ILD"], dropna=False)["mean_mt"]
+            .mean()
+            .rename("mean_mt")
+            .reset_index()
+        )
+        mt_per_subj["ABL"] = MEAN_ABL_SYNTHETIC
+        mt_group = (
+            mt_per_subj.groupby(["ABL", "ILD"], dropna=False)["mean_mt"]
+            .agg(mean="mean", sem=sem, n="count")
+            .reset_index()
+        )
+    else:
+        mt_per_subj = pd.DataFrame(columns=["animal", "ILD", "mean_mt", "ABL"])
+        mt_group = pd.DataFrame(columns=["ABL", "ILD", "mean", "sem", "n"])
+
+    psy_points = tables.get("psy_points", pd.DataFrame()).copy()
+    psy_points = psy_points[pd.to_numeric(psy_points.get("ABL"), errors="coerce").isin(include_abls)].copy()
+    if not psy_points.empty:
+        psy_points = (
+            psy_points.groupby(["subject", "ILD"], dropna=False)["PropLeft"]
+            .mean()
+            .rename("PropLeft")
+            .reset_index()
+        )
+        psy_points["ABL"] = MEAN_ABL_SYNTHETIC
+        psy_group = (
+            psy_points.groupby(["ABL", "ILD"], dropna=False)["PropLeft"]
+            .agg(mean="mean", sem=sem, n="count")
+            .reset_index()
+        )
+        psy_indiv_curves = {}
+        for subject, df_sub in psy_points.groupby("subject", dropna=False, sort=False):
+            fit_input = df_sub.rename(columns={"PropLeft": "mean"})
+            fit = _fit_mean_psy_curve(fit_input, psychometric_l2=psychometric_l2)
+            if fit:
+                psy_indiv_curves[(subject, MEAN_ABL_SYNTHETIC)] = fit[MEAN_ABL_SYNTHETIC]
+        psy_mean_fits = _fit_mean_psy_curve(psy_group, psychometric_l2=psychometric_l2)
+    else:
+        psy_points = pd.DataFrame(columns=["subject", "ILD", "PropLeft", "ABL"])
+        psy_group = pd.DataFrame(columns=["ABL", "ILD", "mean", "sem", "n"])
+        psy_indiv_curves = {}
+        psy_mean_fits = {}
+
+    return {
+        "rt_per_subj": rt_per_subj,
+        "rt_group": rt_group,
+        "mt_per_subj": mt_per_subj,
+        "mt_group": mt_group,
+        "psy_points": psy_points,
+        "psy_group": psy_group,
+        "psy_indiv_curves": psy_indiv_curves,
+        "psy_mean_fits": psy_mean_fits,
+        "jnd_indiv": pd.DataFrame(),
+        "psy_params": pd.DataFrame(),
+        "df_view": tables.get("df_view", pd.DataFrame()).copy(),
+    }
+
+
+def _plot_genotype_mean_abl_summary(
+    *,
+    collapsed_prepared_by_view: dict[str, dict[str, dict[str, Any]]],
+    views: list[ViewSpec],
+    cfg: GroupComparisonConfig,
+    style: PlotStyle,
+) -> plt.Figure | None:
+    view_names = [v.name for v in views if v.name in collapsed_prepared_by_view]
+    if not view_names:
+        return None
+
+    fig, axes = plt.subplots(len(view_names), 3, figsize=(18, 4.8 * len(view_names)), squeeze=False, sharex="col")
+
+    for r, view_name in enumerate(view_names):
+        ax_rt, ax_mt, ax_psy = axes[r]
+        prepared = collapsed_prepared_by_view[view_name]
+        block_names = [name for name in BLOCK_ORDER if name in prepared]
+        if not block_names:
+            continue
+        for block_name in block_names:
+            tables = prepared[block_name]
+            color = BLOCK_COLORS.get(block_name, "gray")
+            style_cfg = BLOCK_STYLES.get(block_name, {})
+            plot_rt_on_ax(ax_rt, tables, MEAN_ABL_SYNTHETIC, color, cfg, **style_cfg)
+            plot_mt_on_ax(ax_mt, tables, MEAN_ABL_SYNTHETIC, color, cfg, **style_cfg)
+            plot_psy_on_ax(ax_psy, tables, MEAN_ABL_SYNTHETIC, color, cfg, **style_cfg)
+
+        style_axes(ax_rt, style, f"{view_name} - RT", "ILD (dB)", "Mean RT (s)")
+        style_axes(ax_mt, style, f"{view_name} - MT", "ILD (dB)", "Mean MT (s)")
+        style_axes(ax_psy, style, f"{view_name} - Psychometric", "ILD (dB)", "P(Left)")
+
+        ax_rt.set_xlim(*cfg.xlim_sym)
+        ax_rt.set_ylim(*cfg.ylim_rt)
+        ax_mt.set_xlim(*cfg.xlim_sym)
+        ax_mt.set_ylim(*cfg.ylim_mt)
+        ax_psy.set_xlim(*cfg.xlim_sym)
+        apply_50_tick_labels(ax_rt, cfg.xlim_sym)
+        apply_50_tick_labels(ax_mt, cfg.xlim_sym)
+        apply_50_tick_labels(ax_psy, cfg.xlim_sym)
+
+    _replace_figure_legend_at_bottom(
+        fig,
+        [name for name in BLOCK_ORDER if any(name in collapsed_prepared_by_view[vn] for vn in view_names)],
+        BLOCK_COLORS,
+        BLOCK_STYLES,
+        style,
+    )
+    fig.suptitle("Biased blocks - mean of ABLs 20, 40, 60", fontsize=26, y=0.995)
+    fig.tight_layout(rect=[0, 0.045, 1, 0.95])
+    return fig
+
+
 def plot_genotype_block_figures(
     bundle: dict[str, Any],
     *,
@@ -754,12 +927,22 @@ def plot_genotype_block_figures(
     views = views or bundle["views"]
 
     outputs = {}
+    collapsed_prepared_by_view: dict[str, dict[str, dict[str, Any]]] = {}
     for view in views:
         df_view = view.selector(df_blocks)
         if df_view.empty:
             continue
         block_views = make_block_views(df_view)
         prepared = build_prepared_signed_rt(df_view, block_views, cfg, psychometric_l2=psychometric_l2)
+        collapsed_prepared = {
+            block_view.name: _collapse_tables_over_abls(
+                prepared.get(block_view.name, {}),
+                include_abls=MEAN_ABL_TARGETS,
+                psychometric_l2=psychometric_l2,
+            )
+            for block_view in block_views
+        }
+        collapsed_prepared_by_view[view.name] = collapsed_prepared
         jnd_indiv = compute_jnd_individuals_by_view(prepared, skip_abl=50)
         group_jnd = compute_group_jnd_by_view(jnd_indiv)
         block_names = [v.name for v in block_views]
@@ -779,6 +962,20 @@ def plot_genotype_block_figures(
             "jnd_indiv": jnd_indiv,
             "group_jnd": group_jnd,
             "counts": df_view["block_condition"].value_counts().to_dict(),
+        }
+        if show:
+            plt.show()
+    mean_abl_figure = _plot_genotype_mean_abl_summary(
+        collapsed_prepared_by_view=collapsed_prepared_by_view,
+        views=views,
+        cfg=cfg,
+        style=style,
+    )
+    if mean_abl_figure is not None:
+        outputs["mean_abl_summary"] = {
+            "figure": mean_abl_figure,
+            "prepared": collapsed_prepared_by_view,
+            "abls": MEAN_ABL_TARGETS,
         }
         if show:
             plt.show()
@@ -1314,6 +1511,23 @@ def _choice_right_series(df: pd.DataFrame) -> pd.Series:
     return pd.Series(np.nan, index=df.index, dtype=float)
 
 
+def _signed_ild_group_series(ild: pd.Series) -> pd.Series:
+    ild = pd.to_numeric(ild, errors="coerce")
+    return pd.Series(
+        np.select(
+            [
+                ild.isin([-2, -1]),
+                ild.isin([1, 2]),
+                ild.isin([-16, -8]),
+                ild.isin([8, 16]),
+            ],
+            ["hard left", "hard right", "easy left", "easy right"],
+            default=pd.NA,
+        ),
+        index=ild.index,
+    )
+
+
 def _transition_window_rows(
     df_blocks: pd.DataFrame,
     *,
@@ -1365,17 +1579,7 @@ def _transition_window_rows(
     out = out[success.ne(0)].copy()
     out["prob_correct"] = success.loc[out.index].eq(1).astype(float)
     out["choice_right"] = _choice_right_series(out)
-    ild = pd.to_numeric(out["ILD"], errors="coerce")
-    out["signed_ild_group"] = np.select(
-        [
-            ild.isin([-2, -1]),
-            ild.isin([1, 2]),
-            ild.isin([-16, -8]),
-            ild.isin([8, 16]),
-        ],
-        ["hard left", "hard right", "easy left", "easy right"],
-        default=pd.NA,
-    )
+    out["signed_ild_group"] = _signed_ild_group_series(out["ILD"])
     out = out[out["signed_ild_group"].notna() & out["choice_right"].notna()].copy()
     out["ABL"] = pd.to_numeric(out["ABL"], errors="coerce")
     return out
@@ -1536,6 +1740,94 @@ def _animal_collapsed_transition_trace(window_df: pd.DataFrame) -> pd.DataFrame:
         window_df.groupby(group_cols, dropna=False)["choice_toward_new_side"]
         .mean()
         .rename("frac_toward_new_side")
+        .reset_index()
+    )
+
+
+def _unbiased_choice_right_baseline(df_blocks: pd.DataFrame) -> pd.DataFrame:
+    if df_blocks.empty or "block_condition" not in df_blocks.columns:
+        return pd.DataFrame(columns=["animal", "dataset_key", "ABL", "signed_ild_group", "baseline_choice_right"])
+
+    df_u = df_blocks[df_blocks["block_condition"].astype(str) == "unbiased"].copy()
+    if df_u.empty:
+        return pd.DataFrame(columns=["animal", "dataset_key", "ABL", "signed_ild_group", "baseline_choice_right"])
+
+    success = pd.to_numeric(df_u["success"], errors="coerce")
+    df_u = df_u[success.ne(0)].copy()
+    if df_u.empty:
+        return pd.DataFrame(columns=["animal", "dataset_key", "ABL", "signed_ild_group", "baseline_choice_right"])
+
+    df_u["choice_right"] = _choice_right_series(df_u)
+    df_u["signed_ild_group"] = _signed_ild_group_series(df_u["ILD"])
+    df_u["ABL"] = pd.to_numeric(df_u["ABL"], errors="coerce")
+    df_u = df_u[df_u["choice_right"].notna() & df_u["signed_ild_group"].notna() & df_u["ABL"].notna()].copy()
+    if df_u.empty:
+        return pd.DataFrame(columns=["animal", "dataset_key", "ABL", "signed_ild_group", "baseline_choice_right"])
+
+    group_cols = [c for c in ["animal", "dataset_key", "ABL", "signed_ild_group"] if c in df_u.columns]
+    return (
+        df_u.groupby(group_cols, dropna=False)["choice_right"]
+        .mean()
+        .rename("baseline_choice_right")
+        .reset_index()
+    )
+
+
+def _animal_baseline_subtracted_transition_trace(
+    window_df: pd.DataFrame,
+    baseline_df: pd.DataFrame,
+) -> pd.DataFrame:
+    if window_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "animal",
+                "genotype",
+                "view",
+                "ABL",
+                "signed_ild_group",
+                "relative_trial",
+                "delta_choice_right",
+            ]
+        )
+
+    join_cols = [c for c in ["animal", "dataset_key", "ABL", "signed_ild_group"] if c in window_df.columns and c in baseline_df.columns]
+    if not join_cols:
+        return pd.DataFrame(
+            columns=[
+                "animal",
+                "genotype",
+                "view",
+                "ABL",
+                "signed_ild_group",
+                "relative_trial",
+                "delta_choice_right",
+            ]
+        )
+
+    merged = window_df.merge(baseline_df, on=join_cols, how="left")
+    merged["delta_choice_right"] = merged["choice_right"] - pd.to_numeric(merged["baseline_choice_right"], errors="coerce")
+    merged = merged[merged["delta_choice_right"].notna()].copy()
+    if merged.empty:
+        return pd.DataFrame(
+            columns=[
+                "animal",
+                "genotype",
+                "view",
+                "ABL",
+                "signed_ild_group",
+                "relative_trial",
+                "delta_choice_right",
+            ]
+        )
+
+    group_cols = [
+        c for c in ["animal", "genotype", "line", "cohort", "dataset_key", "ABL", "signed_ild_group", "relative_trial"]
+        if c in merged.columns
+    ]
+    return (
+        merged.groupby(group_cols, dropna=False)["delta_choice_right"]
+        .mean()
+        .rename("delta_choice_right")
         .reset_index()
     )
 
@@ -3437,6 +3729,172 @@ def plot_collapsed_biased_transition_figures(
     return outputs
 
 
+def plot_baseline_subtracted_biased_transition_figures(
+    bundle: dict[str, Any],
+    *,
+    views: list[ViewSpec] | None = None,
+    window: int = 20,
+    abls: tuple[int, ...] = (20, 40, 60),
+    transition_bin_size: int | None = 1,
+    show: bool = True,
+) -> dict[str, Any]:
+    """Plot stimulus-matched changes in rightward choice relative to unbiased-block baseline."""
+    df_blocks = bundle["df_blocks"]
+    style = bundle["style"]
+    views = views or bundle["views"]
+    fs = style.legend_fs
+    outputs = {}
+
+    ild_group_order = ["hard left", "hard right", "easy left", "easy right"]
+    ild_group_colors = {
+        "hard left": "#6A3D9A",
+        "hard right": "#1B9E77",
+        "easy left": "#E69F00",
+        "easy right": "#D55E00",
+    }
+    ild_group_markers = {
+        "hard left": "o",
+        "hard right": "o",
+        "easy left": "s",
+        "easy right": "s",
+    }
+
+    for view in views:
+        df_view = view.selector(df_blocks)
+        if df_view.empty:
+            continue
+
+        baseline_df = _unbiased_choice_right_baseline(df_view)
+        if baseline_df.empty:
+            continue
+
+        direction_specs = [
+            ("leftward", "rightward", "leftward to rightward"),
+            ("rightward", "leftward", "rightward to leftward"),
+        ]
+        direction_payloads = []
+        for from_condition, to_condition, label in direction_specs:
+            window_df = _transition_window_rows(
+                df_view,
+                window=window,
+                from_condition=from_condition,
+                to_condition=to_condition,
+            )
+            animal_trace = _animal_baseline_subtracted_transition_trace(window_df, baseline_df)
+            if animal_trace.empty:
+                continue
+            animal_trace = _bin_transition_trace(animal_trace, "delta_choice_right", transition_bin_size)
+            animal_trace["view"] = view.name
+            direction_payloads.append((label, window_df, animal_trace))
+
+        if not direction_payloads:
+            continue
+
+        fig, axes = plt.subplots(
+            len(direction_payloads),
+            len(abls),
+            figsize=(5.2 * len(abls), 4.4 * len(direction_payloads)),
+            squeeze=False,
+            sharey=True,
+        )
+
+        all_summary_values = []
+        for _, _, animal_trace in direction_payloads:
+            vals = pd.to_numeric(animal_trace["delta_choice_right"], errors="coerce")
+            vals = vals[np.isfinite(vals)]
+            if len(vals):
+                all_summary_values.append(vals.to_numpy(dtype=float))
+        if all_summary_values:
+            all_summary = np.concatenate(all_summary_values)
+            ymax = np.nanpercentile(np.abs(all_summary), 95)
+            ymax = max(0.15, float(ymax))
+            ymax = min(ymax, 0.75)
+        else:
+            ymax = 0.25
+
+        for row_i, (direction_label, window_df, animal_trace) in enumerate(direction_payloads):
+            row_axes = axes[row_i]
+            for ax, abl in zip(row_axes, abls):
+                abl_df = animal_trace[pd.to_numeric(animal_trace["ABL"], errors="coerce").eq(abl)].copy()
+                for ild_group in ild_group_order:
+                    sub = abl_df[abl_df["signed_ild_group"].astype(str) == ild_group].copy()
+                    if sub.empty:
+                        continue
+                    summary = (
+                        sub.groupby("relative_trial")["delta_choice_right"]
+                        .agg(mean="mean", sem=sem, n_animals="count")
+                        .reset_index()
+                    )
+                    x = summary["relative_trial"].to_numpy(dtype=float)
+                    y = summary["mean"].to_numpy(dtype=float)
+                    yerr = pd.to_numeric(summary["sem"], errors="coerce").to_numpy(dtype=float)
+                    ax.plot(
+                        x,
+                        y,
+                        color=ild_group_colors[ild_group],
+                        marker=ild_group_markers[ild_group],
+                        linestyle="-",
+                        markersize=4.0,
+                        linewidth=1.6,
+                        label=ild_group,
+                    )
+                    finite = np.isfinite(x) & np.isfinite(y) & np.isfinite(yerr)
+                    if finite.any():
+                        ax.fill_between(
+                            x[finite],
+                            y[finite] - yerr[finite],
+                            y[finite] + yerr[finite],
+                            color=ild_group_colors[ild_group],
+                            alpha=0.18,
+                            linewidth=0,
+                        )
+
+                ax.axvline(0, color="0.45", linestyle="--", linewidth=1.1)
+                ax.axhline(0.0, color="0.6", linestyle=":", linewidth=1.0)
+                ax.set_title(f"{direction_label} - ABL {abl}", fontsize=fs, pad=8)
+                ax.set_xlabel("Trials from block transition", fontsize=fs)
+                ax.set_ylim(-ymax, ymax)
+                ax.set_xlim(-window - 1, window + 1)
+                ax.set_xticks([-20, -10, 0, 10, 20])
+                ax.set_xticklabels(["-20", "-10", "0", "10", "20"])
+                ax.tick_params(axis="both", labelsize=fs)
+                for spine in ["right", "top"]:
+                    ax.spines[spine].set_visible(False)
+            row_axes[0].set_ylabel("Delta frac. rightward choices", fontsize=fs)
+
+        handles = [
+            Line2D([], [], color=ild_group_colors[group], marker=ild_group_markers[group], linestyle="-", label=group)
+            for group in ild_group_order
+        ]
+        fig.legend(
+            handles=handles,
+            labels=["hard left (-1,-2)", "hard right (1,2)", "easy left (-8,-16)", "easy right (8,16)"],
+            loc="lower center",
+            bbox_to_anchor=(0.5, -0.02),
+            ncol=4,
+            fontsize=fs,
+            frameon=False,
+        )
+        fig.suptitle(f"{view.name} - matched transitions vs unbiased baseline", fontsize=fs, y=0.99)
+        fig.tight_layout(rect=[0, 0.10, 1, 0.95])
+        outputs[view.name] = {
+            "figure": fig,
+            "baseline_rows": baseline_df,
+            "transition_bin_size": transition_bin_size,
+            "direction_payloads": {
+                direction_label: {
+                    "animal_trace": animal_trace,
+                    "transition_rows": window_df,
+                }
+                for direction_label, window_df, animal_trace in direction_payloads
+            },
+        }
+        if show:
+            plt.show()
+
+    return outputs
+
+
 def plot_biased_blocks(
     *,
     bundle: dict[str, Any],
@@ -3499,6 +3957,13 @@ def plot_biased_blocks(
             transition_bin_size=transition_bin_size,
             show=show,
         )
+    elif layout in {"biased_transition_baseline", "matched_transition_baseline", "baseline_subtracted_transition"}:
+        figures["biased_transition_baseline"] = plot_baseline_subtracted_biased_transition_figures(
+            bundle,
+            views=views,
+            transition_bin_size=transition_bin_size,
+            show=show,
+        )
     elif layout == "all":
         figures["genotype_blocks"] = plot_genotype_block_figures(bundle, views=views, show=show)
         figures["animal_blocks"] = plot_animal_block_figures(bundle, max_animals=max_animals, show=show)
@@ -3539,9 +4004,15 @@ def plot_biased_blocks(
             transition_bin_size=transition_bin_size,
             show=show,
         )
+        figures["biased_transition_baseline"] = plot_baseline_subtracted_biased_transition_figures(
+            bundle,
+            views=views,
+            transition_bin_size=transition_bin_size,
+            show=show,
+        )
     else:
         raise ValueError(
-            "layout must be one of: genotype_blocks, block_conditions, block_condition_params, block_bias, left_to_right_transition, biased_transition_aligned, biased_transition_collapsed, animal_blocks, all."
+            "layout must be one of: genotype_blocks, block_conditions, block_condition_params, block_bias, left_to_right_transition, biased_transition_aligned, biased_transition_collapsed, biased_transition_baseline, animal_blocks, all."
         )
 
     return {"figures": figures}
