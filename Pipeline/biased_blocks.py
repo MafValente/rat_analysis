@@ -1692,6 +1692,33 @@ def _animal_transition_trace(window_df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _animal_transition_trace_all_ilds(window_df: pd.DataFrame) -> pd.DataFrame:
+    base = _animal_transition_trace(window_df)
+    if base.empty:
+        return pd.DataFrame(
+            columns=[
+                "animal",
+                "genotype",
+                "line",
+                "cohort",
+                "dataset_key",
+                "ABL",
+                "relative_trial",
+                "prob_correct",
+            ]
+        )
+    group_cols = [
+        c for c in ["animal", "genotype", "line", "cohort", "dataset_key", "ABL", "relative_trial"]
+        if c in base.columns
+    ]
+    return (
+        base.groupby(group_cols, dropna=False)["prob_correct"]
+        .mean()
+        .rename("prob_correct")
+        .reset_index()
+    )
+
+
 def _animal_aligned_transition_trace(window_df: pd.DataFrame) -> pd.DataFrame:
     if window_df.empty:
         return pd.DataFrame(columns=["animal", "genotype", "view", "ABL", "aligned_ild_group", "relative_trial", "frac_toward_new_side"])
@@ -1826,6 +1853,36 @@ def _animal_baseline_subtracted_transition_trace(
     ]
     return (
         merged.groupby(group_cols, dropna=False)["delta_choice_right"]
+        .mean()
+        .rename("delta_choice_right")
+        .reset_index()
+    )
+
+
+def _animal_baseline_subtracted_transition_trace_all_ilds(
+    window_df: pd.DataFrame,
+    baseline_df: pd.DataFrame,
+) -> pd.DataFrame:
+    base = _animal_baseline_subtracted_transition_trace(window_df, baseline_df)
+    if base.empty:
+        return pd.DataFrame(
+            columns=[
+                "animal",
+                "genotype",
+                "line",
+                "cohort",
+                "dataset_key",
+                "ABL",
+                "relative_trial",
+                "delta_choice_right",
+            ]
+        )
+    group_cols = [
+        c for c in ["animal", "genotype", "line", "cohort", "dataset_key", "ABL", "relative_trial"]
+        if c in base.columns
+    ]
+    return (
+        base.groupby(group_cols, dropna=False)["delta_choice_right"]
         .mean()
         .rename("delta_choice_right")
         .reset_index()
@@ -3484,6 +3541,158 @@ def plot_left_to_right_transition_figures(
     return outputs
 
 
+def plot_left_to_right_transition_genotype_summary(
+    bundle: dict[str, Any],
+    *,
+    views: list[ViewSpec] | None = None,
+    window: int = 20,
+    abls: tuple[int, ...] = (20, 40, 60),
+    transition_bin_size: int | None = 1,
+    view_colors: dict[str, str] | None = None,
+    show: bool = True,
+) -> dict[str, Any]:
+    """Plot genotype/view averages around biased-block transitions after unbiased-baseline subtraction and ILD averaging within animal."""
+    df_blocks = bundle["df_blocks"]
+    style = bundle["style"]
+    views = views or bundle["views"]
+    view_colors = view_colors or {}
+    fs = style.legend_fs
+
+    direction_specs = [
+        ("leftward", "rightward", "leftward to rightward"),
+        ("rightward", "leftward", "rightward to leftward"),
+    ]
+    view_payloads: dict[str, dict[str, pd.DataFrame]] = {}
+
+    for view in views:
+        df_view = view.selector(df_blocks)
+        if df_view.empty:
+            continue
+        baseline_df = _unbiased_choice_right_baseline(df_view)
+        if baseline_df.empty:
+            continue
+        direction_payloads: dict[str, pd.DataFrame] = {}
+        for from_condition, to_condition, label in direction_specs:
+            window_df = _transition_window_rows(
+                df_view,
+                window=window,
+                from_condition=from_condition,
+                to_condition=to_condition,
+            )
+            animal_trace = _animal_baseline_subtracted_transition_trace_all_ilds(window_df, baseline_df)
+            if animal_trace.empty:
+                continue
+            animal_trace = _bin_transition_trace(animal_trace, "delta_choice_right", transition_bin_size)
+            animal_trace["view"] = view.name
+            direction_payloads[label] = animal_trace
+        if direction_payloads:
+            view_payloads[view.name] = direction_payloads
+
+    if not view_payloads:
+        return {}
+
+    fig, axes = plt.subplots(
+        len(direction_specs),
+        len(abls),
+        figsize=(5.2 * len(abls), 4.4 * len(direction_specs)),
+        squeeze=False,
+        sharey=True,
+    )
+
+    all_summary_values = []
+    for direction_map in view_payloads.values():
+        for animal_trace in direction_map.values():
+            vals = pd.to_numeric(animal_trace["delta_choice_right"], errors="coerce")
+            vals = vals[np.isfinite(vals)]
+            if len(vals):
+                all_summary_values.append(vals.to_numpy(dtype=float))
+    if all_summary_values:
+        all_summary = np.concatenate(all_summary_values)
+        ymax = np.nanpercentile(np.abs(all_summary), 95)
+        ymax = max(0.15, float(ymax))
+        ymax = min(ymax, 0.75)
+    else:
+        ymax = 0.25
+
+    for row_i, (_, _, direction_label) in enumerate(direction_specs):
+        row_axes = axes[row_i]
+        for ax, abl in zip(row_axes, abls):
+            for i, view in enumerate(views):
+                animal_trace = view_payloads.get(view.name, {}).get(direction_label)
+                if animal_trace is None or animal_trace.empty:
+                    continue
+                sub = animal_trace[pd.to_numeric(animal_trace["ABL"], errors="coerce").eq(abl)].copy()
+                if sub.empty:
+                    continue
+                summary = (
+                    sub.groupby("relative_trial")["delta_choice_right"]
+                    .agg(mean="mean", sem=sem, n_animals="count")
+                    .reset_index()
+                )
+                x = summary["relative_trial"].to_numpy(dtype=float)
+                y = summary["mean"].to_numpy(dtype=float)
+                yerr = pd.to_numeric(summary["sem"], errors="coerce").to_numpy(dtype=float)
+                color = view_colors.get(view.name, f"C{i % 10}")
+                ax.plot(
+                    x,
+                    y,
+                    color=color,
+                    marker="o",
+                    linestyle="-",
+                    markersize=4.0,
+                    linewidth=1.8,
+                    label=view.name,
+                )
+                finite = np.isfinite(x) & np.isfinite(y) & np.isfinite(yerr)
+                if finite.any():
+                    ax.fill_between(
+                        x[finite],
+                        y[finite] - yerr[finite],
+                        y[finite] + yerr[finite],
+                        color=color,
+                        alpha=0.18,
+                        linewidth=0,
+                    )
+
+            ax.axvline(0, color="0.45", linestyle="--", linewidth=1.1)
+            ax.axhline(0.0, color="0.6", linestyle=":", linewidth=1.0)
+            ax.set_title(f"{direction_label} - ABL {abl}", fontsize=fs, pad=8)
+            ax.set_xlabel("Trials from block transition", fontsize=fs)
+            ax.set_ylim(-ymax, ymax)
+            ax.set_xlim(-window - 1, window + 1)
+            ax.set_xticks([-20, -10, 0, 10, 20])
+            ax.set_xticklabels(["-20", "-10", "0", "10", "20"])
+            ax.tick_params(axis="both", labelsize=fs)
+            for spine in ["right", "top"]:
+                ax.spines[spine].set_visible(False)
+        row_axes[0].set_ylabel("Delta frac. rightward choices", fontsize=fs)
+
+    handles = [
+        Line2D([], [], color=view_colors.get(view.name, f"C{i % 10}"), marker="o", linestyle="-", label=view.name)
+        for i, view in enumerate(views)
+        if view.name in view_payloads
+    ]
+    labels = [view.name for view in views if view.name in view_payloads]
+    fig.legend(
+        handles=handles,
+        labels=labels,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.02),
+        ncol=max(1, min(4, len(labels))),
+        fontsize=fs,
+        frameon=False,
+    )
+    fig.suptitle("Genotype summary - matched transitions vs unbiased baseline", fontsize=fs, y=0.99)
+    fig.tight_layout(rect=[0, 0.10, 1, 0.95])
+    if show:
+        plt.show()
+    return {
+        "figure": fig,
+        "transition_bin_size": transition_bin_size,
+        "view_payloads": view_payloads,
+    }
+
+
 def plot_aligned_biased_transition_figures(
     bundle: dict[str, Any],
     *,
@@ -3943,6 +4152,14 @@ def plot_biased_blocks(
             transition_bin_size=transition_bin_size,
             show=show,
         )
+    elif layout in {"left_to_right_transition_genotypes", "ltr_transition_genotypes", "transition_genotype_summary"}:
+        figures["left_to_right_transition_genotypes"] = plot_left_to_right_transition_genotype_summary(
+            bundle,
+            views=views,
+            transition_bin_size=transition_bin_size,
+            view_colors=view_colors,
+            show=show,
+        )
     elif layout in {"biased_transition_aligned", "aligned_biased_transition", "biased_transition_test"}:
         figures["biased_transition_aligned"] = plot_aligned_biased_transition_figures(
             bundle,
@@ -3992,6 +4209,13 @@ def plot_biased_blocks(
             transition_bin_size=transition_bin_size,
             show=show,
         )
+        figures["left_to_right_transition_genotypes"] = plot_left_to_right_transition_genotype_summary(
+            bundle,
+            views=views,
+            transition_bin_size=transition_bin_size,
+            view_colors=view_colors,
+            show=show,
+        )
         figures["biased_transition_aligned"] = plot_aligned_biased_transition_figures(
             bundle,
             views=views,
@@ -4012,7 +4236,7 @@ def plot_biased_blocks(
         )
     else:
         raise ValueError(
-            "layout must be one of: genotype_blocks, block_conditions, block_condition_params, block_bias, left_to_right_transition, biased_transition_aligned, biased_transition_collapsed, biased_transition_baseline, animal_blocks, all."
+            "layout must be one of: genotype_blocks, block_conditions, block_condition_params, block_bias, left_to_right_transition, left_to_right_transition_genotypes, biased_transition_aligned, biased_transition_collapsed, biased_transition_baseline, animal_blocks, all."
         )
 
     return {"figures": figures}

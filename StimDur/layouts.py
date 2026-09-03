@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Dict, List, Optional, Sequence
 import matplotlib.pyplot as plt
+from matplotlib import colors as mcolors
 import pandas as pd
 import numpy as np
 
@@ -183,6 +184,542 @@ def plot_genotypes_4x3_for_stimdur(
 
     fig.legend(handles, labels, loc="upper right", fontsize=style.legend_fs)
     fig.tight_layout(rect=[0, 0, 0.92, 1])
+    return fig
+
+
+def plot_block_conditions_4x3_for_stimdur_and_view(
+    prepared_by_condition: Dict[str, Dict[str, dict]],
+    stimdur_name: str,
+    view_name: str,
+    condition_order: Sequence[str],
+    condition_colors: Optional[Dict[str, str]],
+    cfg: StimDurComparisonConfig,
+    style: PlotStyle,
+    stimdur_pretty: Optional[Dict[str, str]] = None,
+    view_pretty: Optional[Dict[str, str]] = None,
+    condition_pretty: Optional[Dict[str, str]] = None,
+) -> plt.Figure:
+    if condition_colors is None:
+        condition_colors = {}
+
+    compact_style = PlotStyle(
+        title_fs=max(12, style.title_fs - 7),
+        label_fs=max(11, style.label_fs - 6),
+        tick_fs=max(10, style.tick_fs - 6),
+        legend_fs=max(10, style.legend_fs - 2),
+        title_pad=max(8, style.title_pad - 4),
+    )
+
+    abl_set = set()
+    for condition in condition_order:
+        tables = prepared_by_condition.get(condition, {}).get(stimdur_name, None)
+        if not tables:
+            continue
+        for key in ("rt_group", "mt_group", "psy_group"):
+            dfk = tables.get(key, None)
+            if isinstance(dfk, pd.DataFrame) and (not dfk.empty) and ("ABL" in dfk.columns):
+                abl_set |= set(dfk["ABL"].unique())
+
+    abl_rows = sorted(int(a) for a in abl_set)
+    if not abl_rows:
+        raise ValueError(
+            f"No ABL rows found for stimdur='{stimdur_name}', view='{view_name}' in block-condition layout."
+        )
+
+    fig, axes = plt.subplots(len(abl_rows), 3, figsize=(18, 4.2 * len(abl_rows)), sharex="col")
+    if len(abl_rows) == 1:
+        axes = axes.reshape(1, 3)
+
+    stimdur_title = stimdur_pretty.get(stimdur_name, stimdur_name) if stimdur_pretty else stimdur_name
+    view_title = view_pretty.get(view_name, view_name) if view_pretty else view_name
+
+    for r, abl in enumerate(abl_rows):
+        ax_rt, ax_mt, ax_psy = axes[r, 0], axes[r, 1], axes[r, 2]
+
+        for i, condition in enumerate(condition_order):
+            tables = prepared_by_condition.get(condition, {}).get(stimdur_name, None)
+            if not tables:
+                continue
+            color = condition_colors.get(condition, f"C{i % 10}")
+            plot_rt_on_ax(ax_rt, tables, abl=abl, color=color, cfg=cfg)
+            plot_mt_on_ax(ax_mt, tables, abl=abl, color=color, cfg=cfg)
+            plot_psy_on_ax(ax_psy, tables, abl=abl, color=color, cfg=cfg)
+
+        ax_rt.set_title(f"{view_title} | {stimdur_title} | ABL {abl} RT", fontsize=compact_style.title_fs, pad=compact_style.title_pad)
+        ax_mt.set_title(f"{view_title} | {stimdur_title} | ABL {abl} MT", fontsize=compact_style.title_fs, pad=compact_style.title_pad)
+        ax_psy.set_title(
+            f"{view_title} | {stimdur_title} | ABL {abl} Psy",
+            fontsize=compact_style.title_fs,
+            pad=compact_style.title_pad,
+        )
+
+        ax_rt.set_xlim(*cfg.xlim_abs)
+        ax_mt.set_xlim(*cfg.xlim_sym)
+        ax_psy.set_xlim(*cfg.xlim_sym)
+
+        style_axes(ax_rt, compact_style)
+        style_axes(ax_mt, compact_style)
+        style_axes(ax_psy, compact_style)
+        apply_50_tick_labels(ax_rt, cfg.xlim_abs)
+        apply_50_tick_labels(ax_mt, cfg.xlim_sym)
+        apply_50_tick_labels(ax_psy, cfg.xlim_sym)
+
+    labels = []
+    handles = []
+    for i, condition in enumerate(condition_order):
+        if condition not in prepared_by_condition:
+            continue
+        labels.append(condition_pretty.get(condition, condition) if condition_pretty else condition)
+        handles.append(
+            plt.Line2D([], [], color=condition_colors.get(condition, f"C{i % 10}"), marker="o", linestyle="None")
+        )
+
+    fig.legend(handles, labels, loc="upper right", fontsize=compact_style.legend_fs)
+    fig.tight_layout(rect=[0, 0, 0.92, 1])
+    return fig
+
+
+def plot_biased_metric_grid_for_stimdur(
+    prepared_by_condition_and_view: Dict[str, Dict[str, Dict[str, dict]]],
+    stimdur_name: str,
+    view_names: Sequence[str],
+    condition_order: Sequence[str],
+    condition_pretty: Optional[Dict[str, str]],
+    view_pretty: Optional[Dict[str, str]],
+    cfg: StimDurComparisonConfig,
+    style: PlotStyle,
+    metric: str,
+    stimdur_pretty: Optional[Dict[str, str]] = None,
+    abl_colors: Optional[Dict[int, str]] = None,
+) -> plt.Figure:
+    metric = str(metric).lower()
+    if metric not in {"rt", "mt", "psy"}:
+        raise ValueError("metric must be one of: rt, mt, psy")
+
+    compact_style = PlotStyle(
+        title_fs=max(12, style.title_fs - 7),
+        label_fs=max(11, style.label_fs - 7),
+        tick_fs=max(10, style.tick_fs - 7),
+        legend_fs=max(10, style.legend_fs - 2),
+        title_pad=max(8, style.title_pad - 4),
+    )
+    view_names = list(view_names)
+    if not view_names:
+        raise ValueError("Need at least one view for biased metric grid plotting.")
+
+    abl_values = set()
+    for condition in condition_order:
+        for view_name in view_names:
+            tables = prepared_by_condition_and_view.get(condition, {}).get(view_name, {}).get(stimdur_name)
+            if not tables:
+                continue
+            key = {"rt": "rt_group", "mt": "mt_group", "psy": "psy_group"}[metric]
+            dfk = tables.get(key)
+            if isinstance(dfk, pd.DataFrame) and not dfk.empty and "ABL" in dfk.columns:
+                abl_values |= set(pd.to_numeric(dfk["ABL"], errors="coerce").dropna().astype(int).unique())
+    abl_values = sorted(int(a) for a in abl_values)
+    if not abl_values:
+        raise ValueError(f"No ABL rows found for stimdur='{stimdur_name}' metric='{metric}'.")
+
+    if abl_colors is None:
+        abl_colors = {abl: f"C{i % 10}" for i, abl in enumerate(abl_values)}
+
+    condition_colors = {
+        "unbiased": "#4D4D4D",
+        "rightward": "#1F77B4",
+        "leftward": "#D62728",
+    }
+
+    n_rows = len(abl_values)
+    n_cols = len(view_names)
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(4.6 * n_cols, 4.1 * n_rows),
+        sharex=False,
+        sharey="row",
+        squeeze=False,
+    )
+
+    metric_label = {"rt": "RT", "mt": "MT", "psy": "Psychometric"}[metric]
+    stimdur_title = stimdur_pretty.get(stimdur_name, stimdur_name) if stimdur_pretty else stimdur_name
+
+    def _row_mean_limits(abl: int):
+        vals = []
+        for view_name in view_names:
+            for condition in condition_order:
+                tables = prepared_by_condition_and_view.get(condition, {}).get(view_name, {}).get(stimdur_name)
+                if not tables:
+                    continue
+                key = {"rt": "rt_group", "mt": "mt_group", "psy": "psy_group"}[metric]
+                dfk = tables.get(key)
+                if not isinstance(dfk, pd.DataFrame) or dfk.empty:
+                    continue
+                sub = dfk[pd.to_numeric(dfk["ABL"], errors="coerce") == int(abl)].copy()
+                if sub.empty or "mean" not in sub.columns:
+                    continue
+                mean_vals = pd.to_numeric(sub["mean"], errors="coerce")
+                err_vals = pd.to_numeric(sub["sem"], errors="coerce") if "sem" in sub.columns else pd.Series(0.0, index=sub.index)
+                lo = mean_vals - err_vals.fillna(0.0)
+                hi = mean_vals + err_vals.fillna(0.0)
+                vals.extend(lo[np.isfinite(lo)].tolist())
+                vals.extend(hi[np.isfinite(hi)].tolist())
+        if not vals:
+            return None
+        lo = float(np.min(vals))
+        hi = float(np.max(vals))
+        if metric == "psy":
+            pad = max(0.03, 0.08 * (hi - lo if hi > lo else 1.0))
+            return max(0.0, lo - pad), min(1.0, hi + pad)
+        pad = max(0.02, 0.10 * (hi - lo if hi > lo else max(abs(hi), 0.1)))
+        if hi <= lo:
+            hi = lo + 2 * pad
+        return max(0.0, lo - pad), hi + pad
+
+    row_limits = {abl: _row_mean_limits(abl) for abl in abl_values}
+
+    for r, abl in enumerate(abl_values):
+        for c, view_name in enumerate(view_names):
+            ax = axes[r, c]
+            any_tables = False
+            for i, condition in enumerate(condition_order):
+                tables = prepared_by_condition_and_view.get(condition, {}).get(view_name, {}).get(stimdur_name)
+                if not tables:
+                    continue
+                any_tables = True
+                color = condition_colors.get(condition, f"C{i % 10}")
+                if metric == "rt":
+                    plot_rt_on_ax(ax, tables, abl=abl, color=color, cfg=cfg)
+                    ax.set_xlim(*cfg.xlim_abs)
+                    apply_50_tick_labels(ax, cfg.xlim_abs)
+                elif metric == "mt":
+                    plot_mt_on_ax(ax, tables, abl=abl, color=color, cfg=cfg)
+                    ax.set_xlim(*cfg.xlim_sym)
+                    apply_50_tick_labels(ax, cfg.xlim_sym)
+                else:
+                    plot_psy_on_ax(ax, tables, abl=abl, color=color, cfg=cfg)
+                    ax.set_xlim(*cfg.xlim_sym)
+                    apply_50_tick_labels(ax, cfg.xlim_sym)
+
+            if not any_tables:
+                ax.set_visible(False)
+                continue
+
+            style_axes(ax, compact_style)
+            limits = row_limits.get(abl)
+            if limits is not None:
+                ax.set_ylim(*limits)
+
+            if r == 0:
+                ax.set_title(
+                    view_pretty.get(view_name, view_name) if view_pretty else view_name,
+                    fontsize=compact_style.title_fs,
+                    pad=compact_style.title_pad,
+                )
+            if c == 0:
+                ax.set_ylabel(f"ABL {abl}", fontsize=compact_style.label_fs, color="black")
+
+    handles = [
+        plt.Line2D([], [], color=condition_colors.get(condition, f"C{i % 10}"), marker="o", linestyle="-")
+        for i, condition in enumerate(condition_order)
+    ]
+    labels = [
+        condition_pretty.get(condition, condition) if condition_pretty else condition
+        for condition in condition_order
+    ]
+    fig.legend(handles, labels, loc="upper right", fontsize=compact_style.legend_fs)
+    fig.suptitle(
+        f"{stimdur_title} {metric_label}",
+        fontsize=compact_style.title_fs + 1,
+        y=0.995,
+    )
+    fig.tight_layout(rect=[0, 0, 0.92, 0.97])
+    return fig
+
+
+def _stimdur_sort_key(name: str) -> tuple[int, float]:
+    try:
+        value = float(name)
+    except Exception:
+        return (2, float("inf"))
+    if value == 0:
+        return (1, float("inf"))
+    return (0, value)
+
+
+def _lighten_color(color: str, frac_to_white: float) -> tuple[float, float, float]:
+    rgb = np.asarray(mcolors.to_rgb(color), dtype=float)
+    frac = float(np.clip(frac_to_white, 0.0, 1.0))
+    out = rgb + (1.0 - rgb) * frac
+    return tuple(np.clip(out, 0.0, 1.0))
+
+
+def plot_psychometric_stimdur_grid_for_condition(
+    prepared_by_view: Dict[str, Dict[str, dict]],
+    stimdur_specs: Sequence[StimDurSpec],
+    view_names: Sequence[str],
+    condition_name: str,
+    cfg: StimDurComparisonConfig,
+    style: PlotStyle,
+    view_colors: Optional[Dict[str, str]] = None,
+    stimdur_pretty: Optional[Dict[str, str]] = None,
+    view_pretty: Optional[Dict[str, str]] = None,
+    condition_pretty: Optional[Dict[str, str]] = None,
+) -> plt.Figure:
+    view_colors = view_colors or {}
+    stimdur_pretty = stimdur_pretty or {}
+    view_pretty = view_pretty or {}
+    condition_pretty = condition_pretty or {}
+    view_names = list(view_names)
+
+    abl_set = set()
+    for view_name in view_names:
+        prepared_for_view = prepared_by_view.get(view_name, {})
+        for stimdur in stimdur_specs:
+            tables = prepared_for_view.get(stimdur.name)
+            if not tables:
+                continue
+            dfk = tables.get("psy_group")
+            if isinstance(dfk, pd.DataFrame) and not dfk.empty and "ABL" in dfk.columns:
+                abl_set |= set(pd.to_numeric(dfk["ABL"], errors="coerce").dropna().astype(int).unique())
+    abl_rows = sorted(int(a) for a in abl_set)
+    if not abl_rows:
+        raise ValueError(f"No ABL rows found for block condition '{condition_name}'.")
+
+    compact_style = PlotStyle(
+        title_fs=max(12, style.title_fs - 6),
+        label_fs=max(11, style.label_fs - 6),
+        tick_fs=max(10, style.tick_fs - 6),
+        legend_fs=max(10, style.legend_fs - 2),
+        title_pad=max(8, style.title_pad - 4),
+    )
+    psy_cfg = StimDurComparisonConfig(
+        error_mode="sem",
+        skip_psy_fits=cfg.skip_psy_fits,
+        xlim_sym=cfg.xlim_sym,
+        xlim_abs=cfg.xlim_abs,
+        ild_shift_for_abl50=cfg.ild_shift_for_abl50,
+    )
+    sorted_stimdurs = sorted(list(stimdur_specs), key=lambda spec: _stimdur_sort_key(spec.name))
+    n_stim = max(1, len(sorted_stimdurs))
+
+    fig, axes = plt.subplots(
+        len(abl_rows),
+        len(view_names),
+        figsize=(4.8 * max(1, len(view_names)), 4.2 * len(abl_rows)),
+        sharex=True,
+        sharey="row",
+        squeeze=False,
+    )
+
+    for r, abl in enumerate(abl_rows):
+        for c, view_name in enumerate(view_names):
+            ax = axes[r, c]
+            prepared_for_view = prepared_by_view.get(view_name, {})
+            any_data = False
+            base_color = view_colors.get(view_name, f"C{c % 10}")
+
+            for i, stimdur in enumerate(sorted_stimdurs):
+                tables = prepared_for_view.get(stimdur.name)
+                if not tables:
+                    continue
+                psy_group = tables.get("psy_group")
+                if not isinstance(psy_group, pd.DataFrame) or psy_group.empty:
+                    continue
+                sub = psy_group[pd.to_numeric(psy_group["ABL"], errors="coerce") == int(abl)]
+                if sub.empty:
+                    continue
+                any_data = True
+                frac = 0.72 * (1.0 - (i / max(1, n_stim - 1))) if n_stim > 1 else 0.0
+                color = _lighten_color(base_color, frac)
+                plot_psy_on_ax(ax, tables, abl=abl, color=color, cfg=psy_cfg)
+
+            if not any_data:
+                ax.set_visible(False)
+                continue
+
+            ax.set_xlim(*cfg.xlim_sym)
+            style_axes(ax, compact_style)
+            apply_50_tick_labels(ax, cfg.xlim_sym)
+
+            if r == 0:
+                ax.set_title(
+                    view_pretty.get(view_name, view_name),
+                    fontsize=compact_style.title_fs,
+                    pad=compact_style.title_pad,
+                )
+            if c == 0:
+                ax.set_ylabel(f"ABL {abl}", fontsize=compact_style.label_fs, color="black")
+
+    handles = []
+    labels = []
+    demo_base = "#4D4D4D"
+    for i, stimdur in enumerate(sorted_stimdurs):
+        frac = 0.72 * (1.0 - (i / max(1, n_stim - 1))) if n_stim > 1 else 0.0
+        handles.append(
+            plt.Line2D([], [], color=_lighten_color(demo_base, frac), marker="o", linestyle="-", linewidth=2.5)
+        )
+        labels.append(stimdur_pretty.get(stimdur.name, stimdur.name))
+
+    fig.legend(handles, labels, loc="upper right", fontsize=compact_style.legend_fs)
+    fig.suptitle(
+        f"{condition_pretty.get(condition_name, condition_name)} psychometrics by stim duration",
+        fontsize=compact_style.title_fs + 1,
+        y=0.995,
+    )
+    fig.tight_layout(rect=[0, 0, 0.90, 0.97])
+    return fig
+
+
+def plot_psychometric_stimdur_grid_all_conditions(
+    prepared_by_condition_and_view: Dict[str, Dict[str, Dict[str, dict]]],
+    stimdur_specs: Sequence[StimDurSpec],
+    view_names: Sequence[str],
+    condition_order: Sequence[str],
+    cfg: StimDurComparisonConfig,
+    style: PlotStyle,
+    condition_colors: Optional[Dict[str, str]] = None,
+    stimdur_pretty: Optional[Dict[str, str]] = None,
+    view_pretty: Optional[Dict[str, str]] = None,
+    title_suffix: Optional[str] = None,
+    shade_reference_specs: Optional[Sequence[StimDurSpec]] = None,
+) -> plt.Figure:
+    condition_colors = condition_colors or {}
+    stimdur_pretty = stimdur_pretty or {}
+    view_pretty = view_pretty or {}
+    view_names = list(view_names)
+
+    abl_set = set()
+    for condition in condition_order:
+        for view_name in view_names:
+            prepared_for_view = prepared_by_condition_and_view.get(condition, {}).get(view_name, {})
+            for stimdur in stimdur_specs:
+                tables = prepared_for_view.get(stimdur.name)
+                if not tables:
+                    continue
+                dfk = tables.get("psy_group")
+                if isinstance(dfk, pd.DataFrame) and not dfk.empty and "ABL" in dfk.columns:
+                    abl_set |= set(pd.to_numeric(dfk["ABL"], errors="coerce").dropna().astype(int).unique())
+    abl_rows = sorted(int(a) for a in abl_set)
+    if not abl_rows:
+        raise ValueError("No ABL rows found for combined psychometric grid.")
+
+    compact_style = PlotStyle(
+        title_fs=max(12, style.title_fs - 6),
+        label_fs=max(11, style.label_fs - 6),
+        tick_fs=max(10, style.tick_fs - 6),
+        legend_fs=max(10, style.legend_fs - 2),
+        title_pad=max(8, style.title_pad - 4),
+    )
+    psy_cfg = StimDurComparisonConfig(
+        error_mode="sem",
+        skip_psy_fits=cfg.skip_psy_fits,
+        xlim_sym=cfg.xlim_sym,
+        xlim_abs=cfg.xlim_abs,
+        ild_shift_for_abl50=cfg.ild_shift_for_abl50,
+    )
+    sorted_stimdurs = sorted(list(stimdur_specs), key=lambda spec: _stimdur_sort_key(spec.name))
+    shade_reference = list(shade_reference_specs) if shade_reference_specs is not None else list(stimdur_specs)
+    sorted_reference = sorted(shade_reference, key=lambda spec: _stimdur_sort_key(spec.name))
+    reference_names = [spec.name for spec in sorted_reference]
+    n_stim = max(1, len(sorted_reference))
+
+    def _shade_frac(stimdur_name: str) -> float:
+        if n_stim <= 1:
+            return 0.0
+        try:
+            idx = reference_names.index(stimdur_name)
+        except ValueError:
+            idx = 0
+        return 0.72 * (1.0 - (idx / max(1, n_stim - 1)))
+
+    markers = {"unbiased": "o", "rightward": "s", "leftward": "^"}
+    linestyles = {"unbiased": "-", "rightward": "-", "leftward": "-"}
+
+    fig, axes = plt.subplots(
+        len(abl_rows),
+        len(view_names),
+        figsize=(4.8 * max(1, len(view_names)), 4.2 * len(abl_rows)),
+        sharex=True,
+        sharey="row",
+        squeeze=False,
+    )
+
+    for r, abl in enumerate(abl_rows):
+        for c, view_name in enumerate(view_names):
+            ax = axes[r, c]
+            any_data = False
+
+            for condition in condition_order:
+                prepared_for_view = prepared_by_condition_and_view.get(condition, {}).get(view_name, {})
+                base_color = condition_colors.get(condition, f"C{len(condition)}")
+                marker = markers.get(condition, "o")
+                linestyle = linestyles.get(condition, "-")
+
+                for i, stimdur in enumerate(sorted_stimdurs):
+                    tables = prepared_for_view.get(stimdur.name)
+                    if not tables:
+                        continue
+                    psy_group = tables.get("psy_group")
+                    if not isinstance(psy_group, pd.DataFrame) or psy_group.empty:
+                        continue
+                    sub = psy_group[pd.to_numeric(psy_group["ABL"], errors="coerce") == int(abl)]
+                    if sub.empty:
+                        continue
+                    any_data = True
+                    frac = _shade_frac(stimdur.name)
+                    color = _lighten_color(base_color, frac)
+                    plot_psy_on_ax(
+                        ax,
+                        tables,
+                        abl=abl,
+                        color=color,
+                        cfg=psy_cfg,
+                        marker=marker,
+                        linestyle=linestyle,
+                        markerfacecolor=color,
+                    )
+
+            if not any_data:
+                ax.set_visible(False)
+                continue
+
+            ax.set_xlim(*cfg.xlim_sym)
+            style_axes(ax, compact_style)
+            apply_50_tick_labels(ax, cfg.xlim_sym)
+
+            if r == 0:
+                ax.set_title(
+                    view_pretty.get(view_name, view_name),
+                    fontsize=compact_style.title_fs,
+                    pad=compact_style.title_pad,
+                )
+            if c == 0:
+                ax.set_ylabel(f"ABL {abl}", fontsize=compact_style.label_fs, color="black")
+
+    condition_handles = [
+        plt.Line2D([], [], color=condition_colors.get(condition, "black"), marker=markers.get(condition, "o"), linestyle="-", linewidth=2.5)
+        for condition in condition_order
+    ]
+    condition_labels = [str(condition).capitalize() for condition in condition_order]
+    stimdur_handles = []
+    stimdur_labels = []
+    demo_base = "#4D4D4D"
+    for stimdur in sorted_stimdurs:
+        frac = _shade_frac(stimdur.name)
+        stimdur_handles.append(
+            plt.Line2D([], [], color=_lighten_color(demo_base, frac), marker="o", linestyle="-", linewidth=2.5)
+        )
+        stimdur_labels.append(stimdur_pretty.get(stimdur.name, stimdur.name))
+
+    legend1 = fig.legend(condition_handles, condition_labels, loc="upper right", fontsize=compact_style.legend_fs, bbox_to_anchor=(0.995, 0.995))
+    fig.add_artist(legend1)
+    fig.legend(stimdur_handles, stimdur_labels, loc="upper right", fontsize=compact_style.legend_fs, bbox_to_anchor=(0.995, 0.80))
+    title = "Psychometrics by block condition and stim duration"
+    if title_suffix:
+        title = f"{title} - {title_suffix}"
+    fig.suptitle(title, fontsize=compact_style.title_fs + 1, y=0.995)
+    fig.tight_layout(rect=[0, 0, 0.87, 0.97])
     return fig
 
 

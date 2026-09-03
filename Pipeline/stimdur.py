@@ -19,6 +19,10 @@ from StimDur.config import (
 from StimDur.layouts import (
     plot_absild_perf_3x5_all_genotypes,
     plot_absild_perf_across_stimdur_1x3_for_view,
+    plot_biased_metric_grid_for_stimdur,
+    plot_block_conditions_4x3_for_stimdur_and_view,
+    plot_psychometric_stimdur_grid_all_conditions,
+    plot_psychometric_stimdur_grid_for_condition,
     plot_genotypes_4x3_for_stimdur,
     plot_kreg_4x3_by_abl_for_view,
     plot_stimdur_4x3_for_view,
@@ -35,6 +39,21 @@ BASE_DATA_DIR = ROOT / "DataFiles"
 STIMDUR_COL = "short_duration"
 DEFAULT_STIM_DURS = [8, 15, 16, 32, 60, 64, 120, 0]
 BLOCK_CONDITION_ORDER = ("unbiased", "rightward", "leftward")
+BLOCK_CONDITION_COLORS = {
+    "unbiased": "#4D4D4D",
+    "rightward": "#1F77B4",
+    "leftward": "#D62728",
+}
+BLOCK_CONDITION_PRETTY = {
+    "unbiased": "Unbiased",
+    "rightward": "Right Bias",
+    "leftward": "Left Bias",
+}
+ABL_COLORS = {
+    20: "#0072B2",
+    40: "#E69F00",
+    60: "#009E73",
+}
 STIMDUR_PRETTY = {
     "8": "SD = 8 ms",
     "15": "SD = 15 ms",
@@ -391,6 +410,92 @@ def prepare_stimdur_comparison(
     }
 
 
+def prepare_unbiased_stimdur_comparison(
+    *,
+    df: pd.DataFrame,
+    views: list[ViewSpec],
+    stim_durs: list[int] | tuple[int, ...] = tuple(DEFAULT_STIM_DURS),
+    stimdur_col: str = STIMDUR_COL,
+    cfg: StimDurComparisonConfig | None = None,
+    fcfg: FilterConfig | None = None,
+    style: PlotStyle | None = None,
+    stimdur_pretty: dict[str, str] | None = None,
+    stimdur_colors: dict[str, str] | None = None,
+    view_colors: dict[str, str] | None = None,
+    view_pretty: dict[str, str] | None = None,
+    unbiased_session_types: tuple[int, ...] = (2,),
+    biased_session_types: tuple[int, ...] = (23,),
+    rightward_ild_sign: int = 1,
+    min_direction_imbalance: float = 0.0,
+    max_unbiased_imbalance: float = 0.2,
+) -> dict[str, Any]:
+    cfg = cfg or StimDurComparisonConfig(
+        error_mode="individuals",
+        skip_psy_fits=(50,),
+        ild_shift_for_abl50=True,
+    )
+    fcfg = fcfg or FilterConfig(
+        training_min=16,
+        session_min=13,
+        drop_repeat_trials=True,
+        session_type_values=[2, 23],
+    )
+    style = style or PlotStyle()
+    stimdur_pretty = stimdur_pretty or STIMDUR_PRETTY
+    view_pretty = view_pretty or build_view_labels(views)
+    view_colors = view_colors or build_view_colors(views)
+
+    prefilter_session_types = sorted(set(unbiased_session_types) | set(biased_session_types))
+    mixed_filter = FilterConfig(
+        training_min=fcfg.training_min,
+        session_min=fcfg.session_min,
+        drop_repeat_trials=fcfg.drop_repeat_trials,
+        session_type_values=prefilter_session_types,
+    )
+    df_filtered = apply_filters(df, mixed_filter)
+    df_labeled = add_biased_block_condition(
+        df_filtered,
+        biased_session_types=tuple(int(x) for x in biased_session_types),
+        unbiased_rt_session_types=tuple(int(x) for x in unbiased_session_types),
+        short_duration_value=None,
+        rightward_ild_sign=rightward_ild_sign,
+        min_direction_imbalance=min_direction_imbalance,
+        max_unbiased_imbalance=max_unbiased_imbalance,
+    )
+    df_unbiased = df_labeled[df_labeled["block_condition"] == "unbiased"].copy()
+
+    bundle = prepare_stimdur_comparison(
+        df=df_unbiased,
+        views=views,
+        stim_durs=stim_durs,
+        stimdur_col=stimdur_col,
+        cfg=cfg,
+        fcfg=FilterConfig(
+            training_min=0,
+            session_min=0,
+            drop_repeat_trials=False,
+            session_type_values=None,
+        ),
+        style=style,
+        stimdur_pretty=stimdur_pretty,
+        stimdur_colors=stimdur_colors,
+        view_colors=view_colors,
+        view_pretty=view_pretty,
+    )
+    bundle["df_prefiltered"] = df_filtered
+    bundle["df_labeled"] = df_labeled
+    bundle["selection_summary"] = {
+        "session_type_2_trials": int((pd.to_numeric(df_filtered["session_type"], errors="coerce") == 2).sum()),
+        "session_type_23_unbiased_trials": int(
+            (
+                (pd.to_numeric(df_labeled["session_type"], errors="coerce") == 23)
+                & (df_labeled["block_condition"] == "unbiased")
+            ).sum()
+        ),
+    }
+    return bundle
+
+
 def prepare_biased_block_stimdur_comparison(
     *,
     df: pd.DataFrame,
@@ -635,6 +740,178 @@ def plot_biased_block_stimdur_comparison(
 ) -> dict[str, Any]:
     figures: dict[str, Any] = {}
 
+    if plot_mode == "condition_by_stimdur":
+        figures["condition_by_stimdur"] = {}
+        all_conditions = bundle["condition_bundles"]
+        first_bundle = next(iter(all_conditions.values()))
+        stimdur_specs = first_bundle["stimdur_specs"]
+        stimdur_names = [spec.name for spec in stimdur_specs]
+
+        view_names: list[str] = []
+        for condition in BLOCK_CONDITION_ORDER:
+            for view in bundle["condition_views"].get(condition, []):
+                if view.name not in view_names:
+                    view_names.append(view.name)
+
+        for view_name in view_names:
+            figures["condition_by_stimdur"][view_name] = {}
+            prepared_by_condition = {}
+            for condition in BLOCK_CONDITION_ORDER:
+                condition_bundle = bundle["condition_bundles"].get(condition)
+                if condition_bundle is None:
+                    continue
+                view_prepared = condition_bundle["prepared"].get(view_name)
+                if view_prepared:
+                    prepared_by_condition[condition] = view_prepared
+
+            if not prepared_by_condition:
+                continue
+
+            for stimdur_name in stimdur_names:
+                has_any = any(
+                    stimdur_name in prepared_by_condition.get(condition, {})
+                    for condition in prepared_by_condition
+                )
+                if not has_any:
+                    continue
+                fig = plot_block_conditions_4x3_for_stimdur_and_view(
+                    prepared_by_condition=prepared_by_condition,
+                    stimdur_name=stimdur_name,
+                    view_name=view_name,
+                    condition_order=BLOCK_CONDITION_ORDER,
+                    condition_colors=BLOCK_CONDITION_COLORS,
+                    cfg=first_bundle["cfg"],
+                    style=first_bundle["style"],
+                    stimdur_pretty=first_bundle["stimdur_pretty"],
+                    view_pretty=first_bundle["view_pretty"],
+                    condition_pretty=BLOCK_CONDITION_PRETTY,
+                )
+                figures["condition_by_stimdur"][view_name][stimdur_name] = fig
+                if show:
+                    plt.show()
+
+        return {"figures": figures, **bundle}
+
+    if plot_mode == "metric_grid_by_stimdur":
+        figures["metric_grid_by_stimdur"] = {}
+        all_conditions = bundle["condition_bundles"]
+        first_bundle = next(iter(all_conditions.values()))
+        stimdur_specs = first_bundle["stimdur_specs"]
+        stimdur_names = [spec.name for spec in stimdur_specs]
+
+        view_names: list[str] = []
+        for condition in BLOCK_CONDITION_ORDER:
+            for view in bundle["condition_views"].get(condition, []):
+                if view.name not in view_names:
+                    view_names.append(view.name)
+
+        prepared_by_condition_and_view = {
+            condition: bundle["condition_bundles"][condition]["prepared"]
+            for condition in BLOCK_CONDITION_ORDER
+            if condition in bundle["condition_bundles"]
+        }
+
+        for stimdur_name in stimdur_names:
+            stimdur_figures = {}
+            for metric in ("psy", "rt", "mt"):
+                fig = plot_biased_metric_grid_for_stimdur(
+                    prepared_by_condition_and_view=prepared_by_condition_and_view,
+                    stimdur_name=stimdur_name,
+                    view_names=view_names,
+                    condition_order=BLOCK_CONDITION_ORDER,
+                    condition_pretty=BLOCK_CONDITION_PRETTY,
+                    view_pretty=first_bundle["view_pretty"],
+                    cfg=first_bundle["cfg"],
+                    style=first_bundle["style"],
+                    metric=metric,
+                    stimdur_pretty=first_bundle["stimdur_pretty"],
+                    abl_colors=ABL_COLORS,
+                )
+                stimdur_figures[metric] = fig
+                if show:
+                    plt.show()
+            figures["metric_grid_by_stimdur"][stimdur_name] = stimdur_figures
+
+        return {"figures": figures, **bundle}
+
+    if plot_mode == "psychometric_grid_by_condition":
+        figures["psychometric_grid_by_condition"] = {}
+        all_conditions = bundle["condition_bundles"]
+        first_bundle = next(iter(all_conditions.values()))
+        stimdur_specs = first_bundle["stimdur_specs"]
+
+        view_names: list[str] = []
+        for condition in BLOCK_CONDITION_ORDER:
+            for view in bundle["condition_views"].get(condition, []):
+                if view.name not in view_names:
+                    view_names.append(view.name)
+
+        for condition in BLOCK_CONDITION_ORDER:
+            condition_bundle = bundle["condition_bundles"].get(condition)
+            if condition_bundle is None:
+                continue
+            fig = plot_psychometric_stimdur_grid_for_condition(
+                prepared_by_view=condition_bundle["prepared"],
+                stimdur_specs=stimdur_specs,
+                view_names=view_names,
+                condition_name=condition,
+                cfg=condition_bundle["cfg"],
+                style=condition_bundle["style"],
+                view_colors=condition_bundle["view_colors"],
+                stimdur_pretty=condition_bundle["stimdur_pretty"],
+                view_pretty=condition_bundle["view_pretty"],
+                condition_pretty=BLOCK_CONDITION_PRETTY,
+            )
+            figures["psychometric_grid_by_condition"][condition] = fig
+            if show:
+                plt.show()
+
+        return {"figures": figures, **bundle}
+
+    if plot_mode == "psychometric_grid_all_conditions":
+        all_conditions = bundle["condition_bundles"]
+        first_bundle = next(iter(all_conditions.values()))
+        stimdur_specs = first_bundle["stimdur_specs"]
+
+        view_names: list[str] = []
+        for condition in BLOCK_CONDITION_ORDER:
+            for view in bundle["condition_views"].get(condition, []):
+                if view.name not in view_names:
+                    view_names.append(view.name)
+
+        prepared_by_condition_and_view = {
+            condition: bundle["condition_bundles"][condition]["prepared"]
+            for condition in BLOCK_CONDITION_ORDER
+            if condition in bundle["condition_bundles"]
+        }
+        stimdur_lookup = {spec.name: spec for spec in stimdur_specs}
+        stimdur_groups = {
+            "SD_8_16": (["8", "16"], "SD 8 + 16 ms"),
+            "SD_32_64": (["32", "64"], "SD 32 + 64 ms"),
+            "SD_RT": (["0"], "RT"),
+        }
+        figures["psychometric_grid_all_conditions"] = {}
+        for key, (names, title_suffix) in stimdur_groups.items():
+            subset_specs = [stimdur_lookup[name] for name in names if name in stimdur_lookup]
+            if not subset_specs:
+                continue
+            figures["psychometric_grid_all_conditions"][key] = plot_psychometric_stimdur_grid_all_conditions(
+                prepared_by_condition_and_view=prepared_by_condition_and_view,
+                stimdur_specs=subset_specs,
+                view_names=view_names,
+                condition_order=BLOCK_CONDITION_ORDER,
+                cfg=first_bundle["cfg"],
+                style=first_bundle["style"],
+                condition_colors=BLOCK_CONDITION_COLORS,
+                stimdur_pretty=first_bundle["stimdur_pretty"],
+                view_pretty=first_bundle["view_pretty"],
+                title_suffix=title_suffix,
+                shade_reference_specs=stimdur_specs,
+            )
+            if show:
+                plt.show()
+        return {"figures": figures, **bundle}
+
     for condition in BLOCK_CONDITION_ORDER:
         condition_bundle = bundle["condition_bundles"].get(condition)
         condition_views = bundle["condition_views"].get(condition)
@@ -651,5 +928,20 @@ def plot_biased_block_stimdur_comparison(
             xlim=xlim,
             debug=debug,
         )["figures"]
+
+    valid_modes = {
+        "by_view",
+        "by_stimdur",
+        "performance_by_view",
+        "performance_all",
+        "kreg_by_view",
+        "all",
+        "condition_by_stimdur",
+        "metric_grid_by_stimdur",
+        "psychometric_grid_by_condition",
+        "psychometric_grid_all_conditions",
+    }
+    if plot_mode not in valid_modes:
+        raise ValueError(f"plot_mode must be one of {sorted(valid_modes)}.")
 
     return {"figures": figures, **bundle}
