@@ -21,9 +21,11 @@ class FilterConfig:
     session_min: int = 13
     drop_repeat_trials: bool = True
 
-    # NEW: optional restriction by session_type / stim_dur
+    # Optional restriction by session_type / short_duration / stim_dur.
+    # short_duration=0 is the local convention for long stim_dur=6000 trials.
     session_type_values: Optional[Sequence[int]] = None   # e.g. [1]
-    stim_dur_values: Optional[Sequence[int]] = None       # e.g. [6000]
+    short_duration_values: Optional[Sequence[int]] = None # e.g. [0, 8, 16, 32, 64, 120]
+    stim_dur_values: Optional[Sequence[int]] = None       # legacy/raw duration filter, e.g. [6000]
     sessiontype_or_stimdur: str = "or"  # "or" or "and"
 
 

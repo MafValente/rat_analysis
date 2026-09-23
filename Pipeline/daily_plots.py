@@ -368,6 +368,29 @@ def _sessions_by_type(df: pd.DataFrame) -> dict[str, list]:
     return sessions_by_type
 
 
+def _training_level_label(df: pd.DataFrame) -> str:
+    if df.empty or "training_level" not in df:
+        return "None"
+
+    levels = sorted(
+        pd.to_numeric(df["training_level"], errors="coerce").dropna().unique()
+    )
+    if not levels:
+        return "None"
+    if len(levels) != 1:
+        labels = [
+            str(int(level)) if float(level).is_integer() else f"{float(level):g}"
+            for level in levels
+        ]
+        raise ValueError(
+            "Daily animal summary expected exactly one training level after filtering, "
+            f"but found: {', '.join(labels)}"
+        )
+
+    level = float(levels[0])
+    return str(int(level)) if level.is_integer() else f"{level:g}"
+
+
 def prepare_daily_animal_data(
     df: pd.DataFrame,
     *,
@@ -423,6 +446,7 @@ def prepare_daily_animal_data(
     info = {
         "animal": df_last["animal"].iloc[0] if not df_last.empty and "animal" in df_last else None,
         "setup": df_last["box"].unique() if not df_last.empty and "box" in df_last else [],
+        "training_level": _training_level_label(df_last),
         "session_type": df_last["session_type"].unique() if not df_last.empty and "session_type" in df_last else [],
         "n_sessions": df_last["session"].nunique() if "session" in df_last else 0,
         "sessions_by_type": _sessions_by_type(df_last),
@@ -1498,6 +1522,7 @@ def plot_daily_animal_summary(
     info = (
         f"Animal: {info_data['animal']}\n"
         f"Setup number: {info_data['setup']}\n"
+        f"Training level: {info_data.get('training_level', 'None')}\n"
         f"Session type: {info_data['session_type']}\n"
         f"Sessions: {info_data['n_sessions']}\n"
         + "\n".join(
@@ -1673,6 +1698,7 @@ def plot_daily_animal_summary_with_jnd(
     info = (
         f"Animal: {info_data['animal']}\n"
         f"Setup number: {info_data['setup']}\n"
+        f"Training level: {info_data.get('training_level', 'None')}\n"
         f"Session type: {info_data['session_type']}\n"
         f"Sessions: {info_data['n_sessions']}\n"
         + "\n".join(

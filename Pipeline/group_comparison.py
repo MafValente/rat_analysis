@@ -17,7 +17,12 @@ from GroupComparison.config import (
     PlotStyle,
     ViewSpec,
 )
-from GroupComparison.layouts import plot_views_3x3, plot_abls_4x3
+from GroupComparison.layouts import (
+    plot_views_3x3,
+    plot_abls_4x3,
+    plot_chronometrics,
+    plot_chronometric_psychometrics,
+)
 from GroupComparison.plots import (
     plot_jnd_comparison_per_view,
     plot_psychometric_animals_plus_average,
@@ -184,7 +189,18 @@ def build_group_views(
             raise ValueError("comparison='custom' requires custom_specs.")
         return build_custom_views(custom_specs)
 
-    comparison = "experimentor" if comparison == "experimenter" else comparison
+    comparison = "experimentor" if str(comparison).strip().lower() == "experimenter" else str(comparison).strip().lower()
+    split_aliases = {
+        "none": "none",
+        "dataset": "dataset",
+        "datasets": "dataset",
+        "line": "line",
+        "lines": "line",
+        "cohort": "cohort",
+        "cohorts": "cohort",
+    }
+    split_by_raw = split_by
+    split_by = split_aliases.get(str(split_by).strip().lower())
 
     df_meta = df.dropna(subset=["dataset_key"]).copy()
     available_genotypes = [g for g in ("wt", "het", "hom") if g in set(df_meta.get("genotype", pd.Series(dtype=str)).astype(str))]
@@ -232,7 +248,10 @@ def build_group_views(
                 for cohort in cohort_list:
                     views.append(ViewSpec(f"{genotype} {cohort}", make_selector(genotypes=genotype, lines=lines, cohorts=cohort)))
             else:
-                raise ValueError("split_by must be one of: none, dataset, line, cohort.")
+                raise ValueError(
+                    f"split_by={split_by_raw!r} is not valid for comparison='genotypes'. "
+                    "Use one of: none, dataset, line, cohort."
+                )
 
     elif comparison == "datasets":
         for dataset_name in dataset_names:
@@ -409,7 +428,8 @@ def run_flexible_groupcomparison(
         session_min=0,
         drop_repeat_trials=True,
         session_type_values=[1],
-        stim_dur_values=[6000],
+        short_duration_values=[0],
+        stim_dur_values=None,
         sessiontype_or_stimdur="or",
     )
     style = style or PlotStyle()
@@ -458,7 +478,8 @@ def prepare_flexible_groupcomparison(
         session_min=0,
         drop_repeat_trials=True,
         session_type_values=[1],
-        stim_dur_values=[6000],
+        short_duration_values=[0],
+        stim_dur_values=None,
         sessiontype_or_stimdur="or",
     )
     style = style or PlotStyle()
@@ -595,9 +616,30 @@ def plot_flexible_groupcomparison(
             mode="aborts",
         )
         figs = {"summary_aborts": fig_main}
+    elif layout in {"chronometrics", "chronometrics_pooled"}:
+        separate_abls = layout == "chronometrics"
+        fig_main = plot_chronometrics(
+            prepared=prepared,
+            views=views,
+            cfg=cfg,
+            style=style,
+            view_colors=view_colors,
+            separate_abls=separate_abls,
+            view_styles=view_styles,
+        )
+        fig_psychometrics = plot_chronometric_psychometrics(
+            prepared=prepared,
+            views=views,
+            cfg=cfg,
+            style=style,
+            view_colors=view_colors,
+            separate_abls=separate_abls,
+            view_styles=view_styles,
+        )
+        figs = {layout: fig_main, f"{layout}_psychometrics": fig_psychometrics}
     else:
         raise ValueError(
-            f"Unknown layout='{layout}'. Use 'views_3x3', 'abls_4x3', 'animals_plus_mean', 'psy_params', 'summary_metrics', or 'summary_aborts'."
+            f"Unknown layout='{layout}'. Use 'views_3x3', 'abls_4x3', 'animals_plus_mean', 'psy_params', 'summary_metrics', 'summary_aborts', 'chronometrics', or 'chronometrics_pooled'."
         )
 
     if show:

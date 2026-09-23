@@ -428,6 +428,7 @@ def plot_time_in_level_boxplot(
     views: list[ViewSpec] | None = None,
     time_unit: str = "hour",
     show: bool = True,
+    annotate_median_split: bool | str = False,
 ) -> plt.Figure | None:
     views = views or bundle["views"]
     style: PlotStyle = bundle["style"]
@@ -440,18 +441,56 @@ def plot_time_in_level_boxplot(
     n_views = max(1, len(views))
     cluster_width = 0.7
     step = cluster_width / n_views
+    annotation_rows: list[dict[str, Any]] = []
+    annotation_mode = str(annotate_median_split).strip().lower() if isinstance(annotate_median_split, str) else ""
+    all_values = pd.to_numeric(df_plot[time_col], errors="coerce").dropna()
+    y_span = float(all_values.max() - all_values.min()) if not all_values.empty else 1.0
+    if not np.isfinite(y_span) or y_span <= 0:
+        y_span = 1.0
 
     for view_i, view in enumerate(views):
         color = bundle["view_colors"].get(view.name, f"C{view_i % 10}")
         data = []
         positions = []
         for level_i, level in enumerate(levels):
-            vals = df_plot.loc[
+            box_rows = df_plot.loc[
                 (df_plot["view"] == view.name) & (df_plot[LEVEL_COL] == level),
-                time_col,
-            ].dropna()
-            data.append(vals.to_numpy(dtype=float) if len(vals) else [])
-            positions.append(level_i + (view_i - (n_views - 1) / 2) * step)
+                [SUBJECT_COL, time_col],
+            ].dropna(subset=[time_col]).copy()
+            vals = box_rows[time_col]
+            arr = vals.to_numpy(dtype=float) if len(vals) else np.array([], dtype=float)
+            data.append(arr)
+            position = level_i + (view_i - (n_views - 1) / 2) * step
+            positions.append(position)
+            if annotate_median_split and len(arr):
+                median = float(np.nanmedian(arr))
+                q1, q3 = np.nanpercentile(arr, [25, 75])
+                box_rows[time_col] = pd.to_numeric(box_rows[time_col], errors="coerce")
+                above_animals = sorted(box_rows.loc[box_rows[time_col] > median, SUBJECT_COL].astype(str).unique())
+                below_animals = sorted(box_rows.loc[box_rows[time_col] < median, SUBJECT_COL].astype(str).unique())
+                if annotation_mode in {"animal", "animals", "name", "names", "ids"}:
+                    above_label = ", ".join(above_animals) if above_animals else "-"
+                    below_label = ", ".join(below_animals) if below_animals else "-"
+                    label = (
+                        f"Above n={len(above_animals)}: {above_label}\n"
+                        f"Below n={len(below_animals)}: {below_label}"
+                    )
+                else:
+                    label = f"A{len(above_animals)} / B{len(below_animals)}"
+                box_height = float(q3 - q1)
+                inside_box = (
+                    annotation_mode not in {"animal", "animals", "name", "names", "ids"}
+                    and np.isfinite(box_height)
+                    and box_height >= 0.08 * y_span
+                )
+                annotation_rows.append(
+                    {
+                        "x": position,
+                        "y": median if inside_box else q3 + 0.03 * y_span,
+                        "va": "center" if inside_box else "bottom",
+                        "label": label,
+                    }
+                )
 
         ax.boxplot(
             data,
@@ -473,6 +512,21 @@ def plot_time_in_level_boxplot(
             ),
         )
 
+    if annotate_median_split:
+        for row in annotation_rows:
+            ax.text(
+                row["x"],
+                row["y"],
+                row["label"],
+                ha="center",
+                va=row["va"],
+                fontsize=max(6, style.tick_fs - 6 if annotation_mode in {"animal", "animals", "name", "names", "ids"} else style.tick_fs - 4),
+                color="black",
+                bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none", alpha=0.75),
+                clip_on=False,
+                zorder=10,
+            )
+
     ax.set_xticks(range(len(levels)))
     ax.set_xticklabels(levels)
     ax.set_xlabel("Training level", fontsize=style.label_fs)
@@ -481,6 +535,10 @@ def plot_time_in_level_boxplot(
     ax.set_title("Time spent at each training level", fontsize=style.title_fs, pad=style.title_pad)
     ax.tick_params(axis="both", labelsize=style.tick_fs)
     ax.grid(axis="y", alpha=0.3)
+    if annotate_median_split and annotation_rows:
+        y_min, y_max = ax.get_ylim()
+        top_label = max(float(row["y"]) for row in annotation_rows)
+        ax.set_ylim(y_min, max(y_max, top_label + 0.12 * y_span))
     handles = [
         Line2D([0], [0], color=bundle["view_colors"].get(view.name, f"C{i % 10}"), lw=4, label=bundle["view_labels"].get(view.name, view.name))
         for i, view in enumerate(views)
@@ -501,6 +559,7 @@ def plot_learning_curve_figures(
     plot_mode: str = "training_level_colormap",
     time_unit: str = "hour",
     show: bool = True,
+    annotate_median_split: bool | str = False,
 ) -> dict[str, Any]:
     views = views or bundle["views"]
     figures: dict[str, Any] = {}
@@ -511,13 +570,24 @@ def plot_learning_curve_figures(
     elif mode in {"time_in_level_scatter", "scatter"}:
         figures["time_in_level_scatter"] = plot_time_in_level_scatter(bundle, views=views, time_unit=time_unit, show=show)
     elif mode in {"time_in_level_boxplot", "boxplot", "box"}:
-        figures["time_in_level_boxplot"] = plot_time_in_level_boxplot(bundle, views=views, time_unit=time_unit, show=show)
+        figures["time_in_level_boxplot"] = plot_time_in_level_boxplot(
+            bundle,
+            views=views,
+            time_unit=time_unit,
+            show=show,
+            annotate_median_split=annotate_median_split,
+        )
     elif mode == "all":
         figures["training_level_colormap"] = plot_training_level_colored_curves(bundle, views=views, show=show)
         figures["time_in_level_scatter"] = plot_time_in_level_scatter(bundle, views=views, time_unit=time_unit, show=show)
-        figures["time_in_level_boxplot"] = plot_time_in_level_boxplot(bundle, views=views, time_unit=time_unit, show=show)
+        figures["time_in_level_boxplot"] = plot_time_in_level_boxplot(
+            bundle,
+            views=views,
+            time_unit=time_unit,
+            show=show,
+            annotate_median_split=annotate_median_split,
+        )
     else:
         raise ValueError("plot_mode must be one of: training_level_colormap, time_in_level_scatter, time_in_level_boxplot, all.")
 
     return {"figures": figures}
-

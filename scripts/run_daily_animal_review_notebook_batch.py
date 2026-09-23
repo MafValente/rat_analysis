@@ -6,6 +6,8 @@ from pathlib import Path
 import sys
 import tempfile
 
+import pandas as pd
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -14,7 +16,7 @@ os.environ.setdefault("JUPYTER_CONFIG_DIR", str(ROOT / ".jupyter"))
 os.environ.setdefault("JUPYTER_DATA_DIR", str(ROOT / ".jupyter_data"))
 os.environ.setdefault("JUPYTER_RUNTIME_DIR", str(ROOT / ".jupyter_runtime"))
 
-from analysis.daily_merge import get_animals_for_cohort
+from analysis.daily_merge import get_animals_for_cohort, get_base_dir
 
 
 DEFAULT_NOTEBOOK = ROOT / "notebooks" / "ASD" / "02_daily_animal_review.ipynb"
@@ -22,6 +24,23 @@ DEFAULT_NOTEBOOK = ROOT / "notebooks" / "ASD" / "02_daily_animal_review.ipynb"
 
 def subject_file_for_animal(animal: str) -> str:
     return f"merged_{animal}.csv"
+
+
+def latest_training_level_for_animal(line: str, cohort: str, animal: str) -> int:
+    path = Path(get_base_dir(line, cohort)) / subject_file_for_animal(animal)
+    if not path.exists():
+        raise FileNotFoundError(f"Subject file not found: {path}")
+
+    try:
+        df = pd.read_csv(path, usecols=["training_level"])
+    except ValueError as exc:
+        raise ValueError(f"{path} does not contain a training_level column") from exc
+
+    levels = pd.to_numeric(df["training_level"], errors="coerce").dropna()
+    if levels.empty:
+        raise ValueError(f"No numeric training_level values found in {path}")
+
+    return int(levels.max())
 
 
 def parse_args() -> argparse.Namespace:
@@ -52,6 +71,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--training-level", type=int, default=None)
     parser.add_argument("--training-level-min", type=int, default=None)
     parser.add_argument("--training-level-max", type=int, default=None)
+    parser.add_argument(
+        "--latest-training-level",
+        action="store_true",
+        help=(
+            "For each animal, use its highest numeric training_level and analyze "
+            "all sessions at that level."
+        ),
+    )
     parser.add_argument(
         "--abl-filter",
         type=float,
@@ -118,9 +145,23 @@ def main() -> int:
     if not animals:
         raise SystemExit(f"No animals found for {args.line} {args.cohort}")
 
+    if args.latest_training_level and any(
+        value is not None
+        for value in (args.training_level, args.training_level_min, args.training_level_max)
+    ):
+        raise SystemExit(
+            "--latest-training-level cannot be combined with --training-level, "
+            "--training-level-min, or --training-level-max."
+        )
+
     total = 0
     for animal in animals:
         subject_id = animal
+        training_level = (
+            latest_training_level_for_animal(args.line, args.cohort, subject_id)
+            if args.latest_training_level
+            else args.training_level
+        )
         figure_dir = (args.out_dir / args.line / args.cohort / subject_id).resolve()
         figure_dir.mkdir(parents=True, exist_ok=True)
 
@@ -139,9 +180,10 @@ def main() -> int:
             "LINE": args.line,
             "COHORT": args.cohort,
             "SUBJECT_FILE": subject_file_for_animal(subject_id),
-            "TRAINING_LEVEL": args.training_level,
+            "TRAINING_LEVEL": training_level,
             "TRAINING_LEVEL_MIN": args.training_level_min,
             "TRAINING_LEVEL_MAX": args.training_level_max,
+            "USE_LATEST_TRAINING_LEVEL": args.latest_training_level,
             "ABL_FILTER": args.abl_filter[0] if args.abl_filter and len(args.abl_filter) == 1 else args.abl_filter,
             "SOUND_RAMP_FILTER": (
                 args.sound_ramp_filter[0]

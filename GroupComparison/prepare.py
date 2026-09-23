@@ -34,19 +34,38 @@ def apply_filters(df: pd.DataFrame, fcfg: FilterConfig) -> pd.DataFrame:
     if "session" in df.columns:
         df = df[df["session"] >= fcfg.session_min].copy()
 
-    # ----------restrict to session_type OR stim_dur ----------
-    if fcfg.session_type_values is not None or fcfg.stim_dur_values is not None:
+    # ----------restrict to session_type OR/AND duration ----------
+    if (
+        fcfg.session_type_values is not None
+        or fcfg.short_duration_values is not None
+        or fcfg.stim_dur_values is not None
+    ):
         masks = []
 
         if fcfg.session_type_values is not None:
             if "session_type" not in df.columns:
                 raise KeyError("FilterConfig asked for session_type_values but df has no 'session_type' column.")
-            masks.append(df["session_type"].isin(list(fcfg.session_type_values)))
+            session_type = pd.to_numeric(df["session_type"], errors="coerce")
+            masks.append(session_type.isin(list(fcfg.session_type_values)))
+
+        if fcfg.short_duration_values is not None:
+            if "short_duration" not in df.columns and "stim_dur" not in df.columns:
+                raise KeyError("FilterConfig asked for short_duration_values but df has no 'short_duration' or 'stim_dur' column.")
+            wanted_short = set(pd.to_numeric(pd.Series(list(fcfg.short_duration_values)), errors="coerce").dropna())
+            duration_mask = pd.Series(False, index=df.index)
+            if "short_duration" in df.columns:
+                short_duration = pd.to_numeric(df["short_duration"], errors="coerce")
+                duration_mask = duration_mask | short_duration.isin(wanted_short)
+            if 0 in wanted_short and "stim_dur" in df.columns:
+                stim_dur = pd.to_numeric(df["stim_dur"], errors="coerce")
+                duration_mask = duration_mask | stim_dur.eq(6000)
+            masks.append(duration_mask)
 
         if fcfg.stim_dur_values is not None:
             if "stim_dur" not in df.columns:
                 raise KeyError("FilterConfig asked for stim_dur_values but df has no 'stim_dur' column.")
-            masks.append(df["stim_dur"].isin(list(fcfg.stim_dur_values)))
+            stim_dur = pd.to_numeric(df["stim_dur"], errors="coerce")
+            masks.append(stim_dur.isin(list(fcfg.stim_dur_values)))
 
         if len(masks) == 1:
             mask = masks[0]

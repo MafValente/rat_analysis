@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import contextlib
+import io
 from itertools import product
 from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+from matplotlib.lines import Line2D
+from matplotlib.transforms import ScaledTranslation
 
+from analysis import psychometric as Psychometric
 from analysis.datasets import dataset_key, load_dataset_selections
 from Pipeline.biased_blocks import add_biased_block_condition
 from StimDur.config import (
@@ -31,6 +37,7 @@ from StimDur.prepare import (
     apply_filters,
     build_prepared_by_view_and_stimdur,
     compute_group_jnd_by_view_and_stimdur,
+    sem,
 )
 
 
@@ -728,17 +735,1241 @@ def plot_stimdur_comparison(
     return {"figures": figures, **bundle}
 
 
+STIMDUR_SUMMARY_GROUPS = {
+    "8": ("8",),
+    "16": ("16",),
+    "32": ("32",),
+    "64": ("64",),
+    "RT": ("0",),
+}
+STIMDUR_SUMMARY_COLORS = {
+    "8": "#B2A706",
+    "16": "#0072B2",
+    "32": "#E69F00",
+    "64": "#D55E00",
+    "RT": "#4D4D4D",
+}
+STIMDUR_SUMMARY_MARKERS = {
+    "rightward": "s",
+    "leftward": "^",
+}
+
+
+def _stimdur_summary_group_for_name(stimdur_name: str) -> str | None:
+    stimdur_name = str(stimdur_name)
+    for group_name, names in STIMDUR_SUMMARY_GROUPS.items():
+        if stimdur_name in names:
+            return group_name
+    return None
+
+
+def _normalize_abls(abls: int | list[int] | tuple[int, ...]) -> tuple[int, ...]:
+    if isinstance(abls, (int, np.integer)):
+        return (int(abls),)
+    return tuple(int(a) for a in abls)
+
+
+def _abls_title(abls: tuple[int, ...]) -> str:
+    return ", ".join(str(abl) for abl in abls)
+
+
+PSY_PARAM_SPECS = [
+    ("slope_a", "Slope (a)"),
+    ("bias_b", "Bias (b)"),
+    ("lower_c", "Lower (c)"),
+    ("upper_d", "Upper (d)"),
+    ("asymmetry_1_minus_d_minus_c", "1 - d - c"),
+]
+
+TEMP_PSY_PARAM_SPECS = [
+    ("temp_slope_nearest_ild_regression", "TEMP: slope from nearest ILDs"),
+    ("temp_slope_bias_flank_mean", "TEMP: flank evidence around bias"),
+    ("bias_b", "Bias (b)"),
+    ("lower_c", "Lower (c)"),
+    ("upper_d", "Upper (d)"),
+    ("asymmetry_1_minus_d_minus_c", "1 - d - c"),
+    ("JND", "JND"),
+]
+
+TEMP_PSY_PARAM_LINE_COLUMNS = [
+    [
+        ("temp_slope_nearest_ild_regression", "TEMP: slope from nearest ILDs"),
+        ("temp_slope_bias_flank_mean", "TEMP: flank evidence around bias"),
+        ("bias_b", "Bias (b)"),
+        ("JND", "JND"),
+    ],
+    [
+        ("lower_c", "Lower (c)"),
+        ("upper_d", "Upper (d)"),
+        ("asymmetry_1_minus_d_minus_c", "1 - d - c"),
+    ],
+]
+
+TEMP_PSY_PARAM_COLLAPSED_LINE_COLUMNS = [
+    [
+        ("temp_slope_nearest_ild_regression_collapsed", "TEMP: slope"),
+        ("temp_slope_bias_flank_mean_collapsed", "TEMP: flank evidence"),
+        ("bias_b_collapsed", "Bias (L + R) / 2"),
+    ],
+    [
+        ("lapse_collapsed", "Lapses (L)"),
+        ("asymmetry_1_minus_d_minus_c_collapsed", "1 - d - c"),
+    ],
+]
+
+
+def _temporary_bias_flank_slope_rows(
+    *,
+    animal: Any,
+    abl: Any,
+    res: dict[str, Any],
+    bias: float,
+) -> list[dict[str, Any]]:
+    ilds = pd.to_numeric(pd.Series(res.get("ILDs", [])), errors="coerce").to_numpy(dtype=float)
+    prop_right = pd.to_numeric(pd.Series(res.get("PropLeft", [])), errors="coerce").to_numpy(dtype=float)
+    valid = np.isfinite(ilds) & np.isfinite(prop_right)
+    ilds = ilds[valid]
+    prop_right = prop_right[valid]
+    if len(ilds) < 2 or not np.isfinite(bias):
+        return []
+
+    left_candidates = np.where(ilds < bias)[0]
+    right_candidates = np.where(ilds > bias)[0]
+    if len(left_candidates) == 0 or len(right_candidates) == 0:
+        return []
+
+    left_idx = left_candidates[np.argmax(ilds[left_candidates])]
+    right_idx = right_candidates[np.argmin(ilds[right_candidates])]
+    left_ild = ilds[left_idx]
+    right_ild = ilds[right_idx]
+    left_prop = prop_right[left_idx]
+    right_prop = prop_right[right_idx]
+    if not np.isfinite(left_ild) or not np.isfinite(right_ild) or right_ild == left_ild:
+        return []
+
+    rows = []
+    nearest_regression_slope = (right_prop - left_prop) / (right_ild - left_ild)
+    if np.isfinite(nearest_regression_slope):
+        rows.append(
+            {
+                "animal": animal,
+                "ABL": int(abl),
+                "metric": "temp_slope_nearest_ild_regression",
+                "value": float(nearest_regression_slope),
+            }
+        )
+
+    flank_mean = np.mean([right_prop, 1.0 - left_prop])
+    if np.isfinite(flank_mean):
+        rows.append(
+            {
+                "animal": animal,
+                "ABL": int(abl),
+                "metric": "temp_slope_bias_flank_mean",
+                "value": float(flank_mean),
+            }
+        )
+    return rows
+
+
+def _fit_psychometric_params_by_animal_abl(
+    df_view: pd.DataFrame,
+    *,
+    include_temp_slopes: bool = False,
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    if df_view.empty or "animal" not in df_view.columns:
+        return pd.DataFrame(columns=["animal", "ABL", "metric", "value"])
+
+    for animal, df_animal in df_view.groupby("animal", dropna=False, sort=False):
+        with contextlib.redirect_stdout(io.StringIO()):
+            try:
+                results = Psychometric.compute_psychometrics_by_ABL(df_animal, model="my_psycho")
+            except Exception:
+                results = {}
+        for abl, res in results.items():
+            pars = res.get("pars") if isinstance(res, dict) else None
+            if pars is None or len(pars) < 4:
+                continue
+            for param_i, (metric, _) in enumerate(PSY_PARAM_SPECS[:4]):
+                value = pd.to_numeric(pd.Series([pars[param_i]]), errors="coerce").iloc[0]
+                if pd.notna(value):
+                    rows.append({"animal": animal, "ABL": int(abl), "metric": metric, "value": float(value)})
+            lower_c = pd.to_numeric(pd.Series([pars[2]]), errors="coerce").iloc[0]
+            upper_d = pd.to_numeric(pd.Series([pars[3]]), errors="coerce").iloc[0]
+            if pd.notna(lower_c) and pd.notna(upper_d):
+                rows.append(
+                    {
+                        "animal": animal,
+                        "ABL": int(abl),
+                        "metric": "asymmetry_1_minus_d_minus_c",
+                        "value": float(1.0 - upper_d - lower_c),
+                    }
+                )
+            if include_temp_slopes:
+                bias = pd.to_numeric(pd.Series([pars[1]]), errors="coerce").iloc[0]
+                rows.extend(
+                    _temporary_bias_flank_slope_rows(
+                        animal=animal,
+                        abl=abl,
+                        res=res,
+                        bias=float(bias),
+                    )
+                )
+    return pd.DataFrame(rows, columns=["animal", "ABL", "metric", "value"])
+
+
+def _collect_biased_block_stimdur_summary_metrics(
+    bundle: dict[str, Any],
+    *,
+    include_abls: int | list[int] | tuple[int, ...] = (20, 40, 60),
+    condition_order: tuple[str, ...] = ("rightward", "leftward"),
+) -> pd.DataFrame:
+    include_abls = _normalize_abls(include_abls)
+    rows: list[dict[str, Any]] = []
+
+    for condition in condition_order:
+        condition_bundle = bundle.get("condition_bundles", {}).get(condition)
+        if condition_bundle is None:
+            continue
+        prepared = condition_bundle.get("prepared", {})
+        for view_name, by_stimdur in prepared.items():
+            for stimdur_name, tables in by_stimdur.items():
+                duration_group = _stimdur_summary_group_for_name(stimdur_name)
+                if duration_group is None:
+                    continue
+
+                df_view = tables.get("df_view", pd.DataFrame()).copy()
+                if not df_view.empty and {"animal", "ABL", "success"}.issubset(df_view.columns):
+                    perf = df_view.copy()
+                    perf["ABL"] = pd.to_numeric(perf["ABL"], errors="coerce")
+                    perf["success"] = pd.to_numeric(perf["success"], errors="coerce")
+                    perf = perf[
+                        perf["ABL"].isin(include_abls)
+                        & perf["success"].notna()
+                        & perf["success"].ne(0)
+                    ].copy()
+                    if not perf.empty:
+                        perf["value"] = perf["success"].eq(1).astype(float)
+                        perf_rows = perf.groupby(["animal", "ABL"], dropna=False)["value"].mean().reset_index()
+                        for _, row in perf_rows.iterrows():
+                            rows.append(
+                                {
+                                    "animal": row["animal"],
+                                    "view": view_name,
+                                    "block_condition": condition,
+                                    "stimdur": stimdur_name,
+                                    "duration_group": duration_group,
+                                    "ABL": int(row["ABL"]),
+                                    "metric": "prop_correct",
+                                    "value": float(row["value"]),
+                                }
+                            )
+
+                    bias_rows = _fit_psychometric_params_by_animal_abl(df_view)
+                    if not bias_rows.empty:
+                        bias_rows["ABL"] = pd.to_numeric(bias_rows["ABL"], errors="coerce")
+                        bias_rows = bias_rows[bias_rows["metric"].astype(str) == "bias_b"].copy()
+                        bias_rows = bias_rows[bias_rows["ABL"].isin(include_abls)].dropna(subset=["value"]).copy()
+                        for _, row in bias_rows.iterrows():
+                            rows.append(
+                                {
+                                    "animal": row["animal"],
+                                    "view": view_name,
+                                    "block_condition": condition,
+                                    "stimdur": stimdur_name,
+                                    "duration_group": duration_group,
+                                    "ABL": int(row["ABL"]),
+                                    "metric": "bias_b",
+                                    "value": float(row["value"]),
+                                }
+                            )
+
+                jnd = tables.get("jnd_indiv", pd.DataFrame()).copy()
+                if not jnd.empty and {"subject", "ABL", "JND"}.issubset(jnd.columns):
+                    jnd["ABL"] = pd.to_numeric(jnd["ABL"], errors="coerce")
+                    jnd["JND"] = pd.to_numeric(jnd["JND"], errors="coerce")
+                    jnd = jnd[jnd["ABL"].isin(include_abls)].dropna(subset=["JND"]).copy()
+                    for _, row in jnd.iterrows():
+                        rows.append(
+                            {
+                                "animal": row["subject"],
+                                "view": view_name,
+                                "block_condition": condition,
+                                "stimdur": stimdur_name,
+                                "duration_group": duration_group,
+                                "ABL": int(row["ABL"]),
+                                "metric": "JND",
+                                "value": float(row["JND"]),
+                            }
+                        )
+
+    if not rows:
+        return pd.DataFrame(
+            columns=["animal", "view", "block_condition", "duration_group", "metric", "value", "n_values"]
+        )
+
+    metrics = pd.DataFrame(rows)
+    return (
+        metrics.groupby(["animal", "view", "block_condition", "duration_group", "metric"], dropna=False)["value"]
+        .agg(value="mean", n_values="count")
+        .reset_index()
+    )
+
+
+def _collect_biased_block_stimdur_psy_params(
+    bundle: dict[str, Any],
+    *,
+    include_abls: int | list[int] | tuple[int, ...] = (20, 40, 60),
+    condition_order: tuple[str, ...] = ("rightward", "leftward"),
+    include_temp_slopes: bool = False,
+    include_jnd: bool = False,
+    average_abls: bool = True,
+) -> pd.DataFrame:
+    include_abls = _normalize_abls(include_abls)
+    rows: list[dict[str, Any]] = []
+
+    for condition in condition_order:
+        condition_bundle = bundle.get("condition_bundles", {}).get(condition)
+        if condition_bundle is None:
+            continue
+        prepared = condition_bundle.get("prepared", {})
+        for view_name, by_stimdur in prepared.items():
+            for stimdur_name, tables in by_stimdur.items():
+                duration_group = _stimdur_summary_group_for_name(stimdur_name)
+                if duration_group is None:
+                    continue
+
+                df_view = tables.get("df_view", pd.DataFrame()).copy()
+                params = _fit_psychometric_params_by_animal_abl(
+                    df_view,
+                    include_temp_slopes=include_temp_slopes,
+                )
+                if not params.empty:
+                    params["ABL"] = pd.to_numeric(params["ABL"], errors="coerce")
+                    params = params[params["ABL"].isin(include_abls)].dropna(subset=["value"]).copy()
+                    for _, row in params.iterrows():
+                        rows.append(
+                            {
+                                "animal": row["animal"],
+                                "view": view_name,
+                                "block_condition": condition,
+                                "stimdur": stimdur_name,
+                                "duration_group": duration_group,
+                                "ABL": int(row["ABL"]),
+                                "metric": row["metric"],
+                                "value": float(row["value"]),
+                            }
+                        )
+
+                if include_jnd:
+                    jnd = tables.get("jnd_indiv", pd.DataFrame()).copy()
+                    if not jnd.empty and {"subject", "ABL", "JND"}.issubset(jnd.columns):
+                        jnd["ABL"] = pd.to_numeric(jnd["ABL"], errors="coerce")
+                        jnd["JND"] = pd.to_numeric(jnd["JND"], errors="coerce")
+                        jnd = jnd[jnd["ABL"].isin(include_abls)].dropna(subset=["JND"]).copy()
+                        for _, row in jnd.iterrows():
+                            rows.append(
+                                {
+                                    "animal": row["subject"],
+                                    "view": view_name,
+                                    "block_condition": condition,
+                                    "stimdur": stimdur_name,
+                                    "duration_group": duration_group,
+                                    "ABL": int(row["ABL"]),
+                                    "metric": "JND",
+                                    "value": float(row["JND"]),
+                                }
+                            )
+
+    group_cols = ["animal", "view", "block_condition", "duration_group", "metric"]
+    if not average_abls:
+        group_cols.insert(4, "ABL")
+
+    if not rows:
+        return pd.DataFrame(columns=[*group_cols, "value", "n_values"])
+
+    metrics = pd.DataFrame(rows)
+    return (
+        metrics.groupby(group_cols, dropna=False)["value"]
+        .agg(value="mean", n_values="count")
+        .reset_index()
+    )
+
+
+def _collect_biased_block_stimdur_collapsed_temp_params(
+    bundle: dict[str, Any],
+    *,
+    include_abls: int | list[int] | tuple[int, ...] = (20, 40, 60),
+) -> pd.DataFrame:
+    side_metrics = _collect_biased_block_stimdur_psy_params(
+        bundle,
+        include_abls=include_abls,
+        condition_order=("rightward", "leftward"),
+        include_temp_slopes=True,
+        include_jnd=False,
+        average_abls=False,
+    )
+    if side_metrics.empty:
+        return pd.DataFrame(columns=["animal", "view", "duration_group", "metric", "value", "n_abls"])
+
+    rows: list[dict[str, Any]] = []
+    group_cols = ["animal", "view", "duration_group", "ABL"]
+    for keys, sub in side_metrics.groupby(group_cols, dropna=False, sort=False):
+        animal, view_name, duration_group, abl = keys
+        pivot = sub.pivot_table(
+            index="metric",
+            columns="block_condition",
+            values="value",
+            aggfunc="mean",
+        )
+
+        def side_value(metric: str, condition: str) -> float:
+            if metric not in pivot.index or condition not in pivot.columns:
+                return np.nan
+            value = pd.to_numeric(pd.Series([pivot.loc[metric, condition]]), errors="coerce").iloc[0]
+            return float(value) if pd.notna(value) else np.nan
+
+        collapsed_specs = [
+            (
+                "temp_slope_nearest_ild_regression_collapsed",
+                (
+                    side_value("temp_slope_nearest_ild_regression", "leftward")
+                    + side_value("temp_slope_nearest_ild_regression", "rightward")
+                )
+                / 2.0,
+            ),
+            (
+                "temp_slope_bias_flank_mean_collapsed",
+                (
+                    side_value("temp_slope_bias_flank_mean", "leftward")
+                    + side_value("temp_slope_bias_flank_mean", "rightward")
+                )
+                / 2.0,
+            ),
+            (
+                "bias_b_collapsed",
+                (side_value("bias_b", "leftward") + side_value("bias_b", "rightward")) / 2.0,
+            ),
+            (
+                "asymmetry_1_minus_d_minus_c_collapsed",
+                (
+                    side_value("asymmetry_1_minus_d_minus_c", "leftward")
+                    + side_value("asymmetry_1_minus_d_minus_c", "rightward")
+                )
+                / 2.0,
+            ),
+        ]
+
+        lapse_left = (
+            side_value("lower_c", "leftward")
+            + (1.0 - side_value("upper_d", "leftward"))
+        ) / 2.0
+        lapse_right = (
+            side_value("lower_c", "rightward")
+            + (1.0 - side_value("upper_d", "rightward"))
+        ) / 2.0
+        collapsed_specs.append(("lapse_collapsed", (lapse_left + lapse_right) / 2.0))
+
+        for metric, value in collapsed_specs:
+            if np.isfinite(value):
+                rows.append(
+                    {
+                        "animal": animal,
+                        "view": view_name,
+                        "duration_group": duration_group,
+                        "ABL": int(abl),
+                        "metric": metric,
+                        "value": float(value),
+                    }
+                )
+
+    if not rows:
+        return pd.DataFrame(columns=["animal", "view", "duration_group", "metric", "value", "n_abls"])
+    collapsed_by_abl = pd.DataFrame(rows)
+    return (
+        collapsed_by_abl.groupby(["animal", "view", "duration_group", "metric"], dropna=False)["value"]
+        .agg(value="mean", n_abls="count")
+        .reset_index()
+    )
+
+
+def plot_biased_block_stimdur_summary_metrics(
+    *,
+    bundle: dict[str, Any],
+    show: bool = True,
+    abls: int | list[int] | tuple[int, ...] = (20, 40, 60),
+) -> dict[str, Any]:
+    """Plot ABL-averaged bias, proportion correct, and JND by genotype panels."""
+    style = bundle["style"]
+    view_pretty = bundle.get("view_pretty", {})
+    include_abls = _normalize_abls(abls)
+    metrics = _collect_biased_block_stimdur_summary_metrics(bundle, include_abls=include_abls)
+    if metrics.empty:
+        raise ValueError("No ABL-averaged biased-block stim-duration summary metrics were available.")
+
+    view_names: list[str] = []
+    for condition in ("rightward", "leftward"):
+        for view in bundle.get("condition_views", {}).get(condition, []):
+            if view.name not in view_names:
+                view_names.append(view.name)
+    if not view_names:
+        view_names = sorted(metrics["view"].dropna().astype(str).unique())
+
+    duration_groups = [name for name in STIMDUR_SUMMARY_GROUPS if name in set(metrics["duration_group"].astype(str))]
+    condition_order = [name for name in ("leftward", "rightward") if name in set(metrics["block_condition"].astype(str))]
+    group_width = len(duration_groups)
+    group_gap = 1.0
+    condition_bases = {name: i * (group_width + group_gap) for i, name in enumerate(condition_order)}
+    condition_centers = {
+        name: base + (group_width - 1) / 2.0
+        for name, base in condition_bases.items()
+    }
+    duration_positions = {
+        (condition, duration_group): condition_bases[condition] + duration_i
+        for condition in condition_order
+        for duration_i, duration_group in enumerate(duration_groups)
+    }
+    specs = [
+        ("bias_b", "Psychometric bias", "Bias (b)"),
+        ("prop_correct", "Proportion correct", "Proportion correct"),
+        ("JND", "JND", "JND"),
+    ]
+    fs = style.legend_fs
+    rng = np.random.default_rng(5)
+    fig, axes = plt.subplots(
+        len(specs),
+        len(view_names),
+        figsize=(5.4 * len(view_names), 3.6 * len(specs)),
+        squeeze=False,
+        sharey="row",
+    )
+
+    for row_i, (metric, title, ylabel) in enumerate(specs):
+        metric_df = metrics[metrics["metric"].astype(str) == metric].copy()
+        for col_i, view_name in enumerate(view_names):
+            ax = axes[row_i, col_i]
+            for condition in condition_order:
+                marker = STIMDUR_SUMMARY_MARKERS.get(condition, "o")
+                for duration_group in duration_groups:
+                    color = STIMDUR_SUMMARY_COLORS.get(duration_group, "0.4")
+                    sub = metric_df[
+                        (metric_df["view"].astype(str) == view_name)
+                        & (metric_df["block_condition"].astype(str) == condition)
+                        & (metric_df["duration_group"].astype(str) == duration_group)
+                    ].copy()
+                    values = pd.to_numeric(sub["value"], errors="coerce").dropna()
+                    if values.empty:
+                        continue
+                    x = duration_positions[(condition, duration_group)]
+                    jitter = rng.uniform(-0.018, 0.018, size=len(values))
+                    ax.scatter(
+                        np.full(len(values), x, dtype=float) + jitter,
+                        values.to_numpy(dtype=float),
+                        s=24,
+                        facecolors="none",
+                        edgecolors=color,
+                        marker=marker,
+                        alpha=0.40,
+                        linewidths=0.9,
+                        zorder=3,
+                    )
+                    ax.errorbar(
+                        x,
+                        float(values.mean()),
+                        yerr=sem(values.to_numpy(dtype=float)),
+                        color=color,
+                        marker=marker,
+                        markerfacecolor=color,
+                        markeredgecolor=color,
+                        markersize=7.5,
+                        linestyle="None",
+                        linewidth=1.5,
+                        elinewidth=1.3,
+                        capsize=3,
+                        zorder=5,
+                    )
+
+            if metric in {"bias_b", "asymmetry_1_minus_d_minus_c"}:
+                ax.axhline(0, color="0.55", linestyle="--", linewidth=1.0, zorder=0)
+            elif metric == "prop_correct":
+                ax.axhline(0.5, color="0.55", linestyle=":", linewidth=1.0, zorder=0)
+                ax.set_ylim(0, 1)
+            if row_i == 0:
+                ax.set_title(view_pretty.get(view_name, view_name), fontsize=fs, pad=style.title_pad)
+            tick_positions = [
+                duration_positions[(condition, duration_group)]
+                for condition in condition_order
+                for duration_group in duration_groups
+            ]
+            tick_labels = [
+                duration_group
+                for condition in condition_order
+                for duration_group in duration_groups
+            ]
+            ax.set_xticks(tick_positions)
+            ax.set_xticklabels(
+                tick_labels,
+                rotation=35,
+                ha="center",
+                fontsize=max(8, fs - 3),
+            )
+            if row_i == len(specs) - 1:
+                for condition, center in condition_centers.items():
+                    group_label = ax.text(
+                        center,
+                        0,
+                        BLOCK_CONDITION_PRETTY.get(condition, condition),
+                        transform=ax.get_xaxis_transform()
+                        + ScaledTranslation(0, -42 / 72, fig.dpi_scale_trans),
+                        ha="center",
+                        va="top",
+                        fontsize=max(8, fs - 2),
+                        clip_on=False,
+                    )
+                    group_label.set_in_layout(False)
+            else:
+                ax.tick_params(axis="x", bottom=False, labelbottom=False)
+            ax.grid(True, axis="x", linestyle=":", alpha=0.25)
+            if col_i == 0:
+                ax.set_ylabel(ylabel, fontsize=fs, color="black")
+                ax.tick_params(axis="y", labelsize=fs)
+            else:
+                ax.set_ylabel("")
+                ax.tick_params(axis="y", left=False, labelleft=False)
+            for spine in ["right", "top"]:
+                ax.spines[spine].set_visible(False)
+            if col_i != 0:
+                ax.spines["left"].set_visible(False)
+
+    duration_handles = [
+        Line2D(
+            [],
+            [],
+            color=STIMDUR_SUMMARY_COLORS.get(group, "0.4"),
+            marker="o",
+            linestyle="None",
+            markerfacecolor=STIMDUR_SUMMARY_COLORS.get(group, "0.4"),
+            markeredgecolor=STIMDUR_SUMMARY_COLORS.get(group, "0.4"),
+            label=group,
+        )
+        for group in duration_groups
+    ]
+    fill_handles = [
+        Line2D([], [], color="black", marker="o", linestyle="None", markerfacecolor="none", markeredgecolor="black", label="Animal"),
+        Line2D([], [], color="black", marker="o", linestyle="None", markerfacecolor="black", markeredgecolor="black", label="Mean"),
+    ]
+    fig.legend(
+        handles=duration_handles + fill_handles,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.01),
+        ncol=max(1, len(duration_handles) + len(fill_handles)),
+        fontsize=fs,
+        frameon=False,
+    )
+    fig.suptitle(f"Biased blocks summary by genotype - mean of ABLs {_abls_title(include_abls)}", fontsize=fs, y=0.995)
+    fig.tight_layout(rect=[0, 0.08, 1, 0.96])
+    if show:
+        plt.show()
+
+    return {
+        "summary": {
+            "figure": fig,
+            "metrics": metrics,
+            "abls": include_abls,
+            "duration_groups": STIMDUR_SUMMARY_GROUPS,
+        }
+    }
+
+
+def plot_biased_block_stimdur_psy_params(
+    *,
+    bundle: dict[str, Any],
+    show: bool = True,
+    temporary_slope_options: bool = False,
+    abls: int | list[int] | tuple[int, ...] = (20, 40, 60),
+) -> dict[str, Any]:
+    """Plot ABL-averaged psychometric parameters by genotype panels."""
+    style = bundle["style"]
+    view_pretty = bundle.get("view_pretty", {})
+    param_specs = TEMP_PSY_PARAM_SPECS if temporary_slope_options else PSY_PARAM_SPECS
+    include_abls = _normalize_abls(abls)
+    metrics = _collect_biased_block_stimdur_psy_params(
+        bundle,
+        include_abls=include_abls,
+        include_temp_slopes=temporary_slope_options,
+        include_jnd=temporary_slope_options,
+    )
+    if metrics.empty:
+        raise ValueError("No ABL-averaged biased-block stim-duration psychometric parameters were available.")
+
+    view_names: list[str] = []
+    for condition in ("rightward", "leftward"):
+        for view in bundle.get("condition_views", {}).get(condition, []):
+            if view.name not in view_names:
+                view_names.append(view.name)
+    if not view_names:
+        view_names = sorted(metrics["view"].dropna().astype(str).unique())
+
+    duration_groups = [name for name in STIMDUR_SUMMARY_GROUPS if name in set(metrics["duration_group"].astype(str))]
+    condition_order = [name for name in ("leftward", "rightward") if name in set(metrics["block_condition"].astype(str))]
+    group_width = len(duration_groups)
+    group_gap = 1.0
+    condition_bases = {name: i * (group_width + group_gap) for i, name in enumerate(condition_order)}
+    condition_centers = {
+        name: base + (group_width - 1) / 2.0
+        for name, base in condition_bases.items()
+    }
+    duration_positions = {
+        (condition, duration_group): condition_bases[condition] + duration_i
+        for condition in condition_order
+        for duration_i, duration_group in enumerate(duration_groups)
+    }
+
+    fs = style.legend_fs
+    rng = np.random.default_rng(6)
+    fig, axes = plt.subplots(
+        len(param_specs),
+        len(view_names),
+        figsize=(5.4 * len(view_names), 3.6 * len(param_specs)),
+        squeeze=False,
+        sharey="row",
+    )
+
+    for row_i, (metric, label) in enumerate(param_specs):
+        metric_df = metrics[metrics["metric"].astype(str) == metric].copy()
+        for col_i, view_name in enumerate(view_names):
+            ax = axes[row_i, col_i]
+            for condition in condition_order:
+                marker = STIMDUR_SUMMARY_MARKERS.get(condition, "o")
+                for duration_group in duration_groups:
+                    color = STIMDUR_SUMMARY_COLORS.get(duration_group, "0.4")
+                    sub = metric_df[
+                        (metric_df["view"].astype(str) == view_name)
+                        & (metric_df["block_condition"].astype(str) == condition)
+                        & (metric_df["duration_group"].astype(str) == duration_group)
+                    ].copy()
+                    values = pd.to_numeric(sub["value"], errors="coerce").dropna()
+                    if values.empty:
+                        continue
+                    x = duration_positions[(condition, duration_group)]
+                    jitter = rng.uniform(-0.018, 0.018, size=len(values))
+                    ax.scatter(
+                        np.full(len(values), x, dtype=float) + jitter,
+                        values.to_numpy(dtype=float),
+                        s=24,
+                        facecolors="none",
+                        edgecolors=color,
+                        marker=marker,
+                        alpha=0.40,
+                        linewidths=0.9,
+                        zorder=3,
+                    )
+                    ax.errorbar(
+                        x,
+                        float(values.mean()),
+                        yerr=sem(values.to_numpy(dtype=float)),
+                        color=color,
+                        marker=marker,
+                        markerfacecolor=color,
+                        markeredgecolor=color,
+                        markersize=7.5,
+                        linestyle="None",
+                        linewidth=1.5,
+                        elinewidth=1.3,
+                        capsize=3,
+                        zorder=5,
+                    )
+
+            if metric in {"bias_b", "asymmetry_1_minus_d_minus_c"}:
+                ax.axhline(0, color="0.55", linestyle="--", linewidth=1.0, zorder=0)
+            if row_i == 0:
+                ax.set_title(view_pretty.get(view_name, view_name), fontsize=fs, pad=style.title_pad)
+            tick_positions = [
+                duration_positions[(condition, duration_group)]
+                for condition in condition_order
+                for duration_group in duration_groups
+            ]
+            tick_labels = [
+                duration_group
+                for condition in condition_order
+                for duration_group in duration_groups
+            ]
+            ax.set_xticks(tick_positions)
+            ax.set_xticklabels(tick_labels, rotation=35, ha="center", fontsize=max(8, fs - 3))
+            if row_i == len(param_specs) - 1:
+                for condition, center in condition_centers.items():
+                    group_label = ax.text(
+                        center,
+                        0,
+                        BLOCK_CONDITION_PRETTY.get(condition, condition),
+                        transform=ax.get_xaxis_transform()
+                        + ScaledTranslation(0, -42 / 72, fig.dpi_scale_trans),
+                        ha="center",
+                        va="top",
+                        fontsize=max(8, fs - 2),
+                        clip_on=False,
+                    )
+                    group_label.set_in_layout(False)
+            else:
+                ax.tick_params(axis="x", bottom=False, labelbottom=False)
+            ax.grid(True, axis="x", linestyle=":", alpha=0.25)
+            if col_i == 0:
+                ax.set_ylabel(label, fontsize=fs, color="black")
+                ax.tick_params(axis="y", labelsize=fs)
+            else:
+                ax.set_ylabel("")
+                ax.tick_params(axis="y", left=False, labelleft=False)
+            for spine in ["right", "top"]:
+                ax.spines[spine].set_visible(False)
+            if col_i != 0:
+                ax.spines["left"].set_visible(False)
+
+    duration_handles = [
+        Line2D(
+            [],
+            [],
+            color=STIMDUR_SUMMARY_COLORS.get(group, "0.4"),
+            marker="o",
+            linestyle="None",
+            markerfacecolor=STIMDUR_SUMMARY_COLORS.get(group, "0.4"),
+            markeredgecolor=STIMDUR_SUMMARY_COLORS.get(group, "0.4"),
+            label=group,
+        )
+        for group in duration_groups
+    ]
+    fill_handles = [
+        Line2D([], [], color="black", marker="o", linestyle="None", markerfacecolor="none", markeredgecolor="black", label="Animal"),
+        Line2D([], [], color="black", marker="o", linestyle="None", markerfacecolor="black", markeredgecolor="black", label="Mean"),
+    ]
+    fig.legend(
+        handles=duration_handles + fill_handles,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.01),
+        ncol=max(1, len(duration_handles) + len(fill_handles)),
+        fontsize=fs,
+        frameon=False,
+    )
+    title = f"Biased block psychometric parameters by genotype - mean of ABLs {_abls_title(include_abls)}"
+    if temporary_slope_options:
+        title = f"TEMPORARY: biased block slope options by genotype - mean of ABLs {_abls_title(include_abls)}"
+    fig.suptitle(title, fontsize=fs, y=0.995)
+    fig.tight_layout(rect=[0, 0.08, 1, 0.96])
+    if show:
+        plt.show()
+
+    return {
+        "summary": {
+            "figure": fig,
+            "metrics": metrics,
+            "abls": include_abls,
+            "duration_groups": STIMDUR_SUMMARY_GROUPS,
+            "temporary_slope_options": temporary_slope_options,
+        }
+    }
+
+
+def plot_biased_block_stimdur_temp_slope_lines(
+    *,
+    bundle: dict[str, Any],
+    show: bool = True,
+    abls: int | list[int] | tuple[int, ...] = (20, 40, 60),
+) -> dict[str, Any]:
+    """Temporary slope-options layout with genotype mean lines and SEM shading."""
+    style = bundle["style"]
+    view_pretty = bundle.get("view_pretty", {})
+    view_colors = bundle.get("view_colors", {})
+    include_abls = _normalize_abls(abls)
+    metrics = _collect_biased_block_stimdur_psy_params(
+        bundle,
+        include_abls=include_abls,
+        include_temp_slopes=True,
+        include_jnd=True,
+    )
+    if metrics.empty:
+        raise ValueError("No ABL-averaged biased-block stim-duration psychometric parameters were available.")
+
+    view_names: list[str] = []
+    for condition in ("rightward", "leftward"):
+        for view in bundle.get("condition_views", {}).get(condition, []):
+            if view.name not in view_names:
+                view_names.append(view.name)
+    if not view_names:
+        view_names = sorted(metrics["view"].dropna().astype(str).unique())
+
+    duration_groups = [name for name in STIMDUR_SUMMARY_GROUPS if name in set(metrics["duration_group"].astype(str))]
+    condition_order = [name for name in ("leftward", "rightward") if name in set(metrics["block_condition"].astype(str))]
+    group_width = len(duration_groups)
+    group_gap = 1.0
+    condition_bases = {name: i * (group_width + group_gap) for i, name in enumerate(condition_order)}
+    condition_centers = {
+        name: base + (group_width - 1) / 2.0
+        for name, base in condition_bases.items()
+    }
+    duration_positions = {
+        (condition, duration_group): condition_bases[condition] + duration_i
+        for condition in condition_order
+        for duration_i, duration_group in enumerate(duration_groups)
+    }
+    tick_positions = [
+        duration_positions[(condition, duration_group)]
+        for condition in condition_order
+        for duration_group in duration_groups
+    ]
+    tick_labels = [
+        duration_group
+        for condition in condition_order
+        for duration_group in duration_groups
+    ]
+
+    fs = style.legend_fs
+    n_rows = max(len(col_specs) for col_specs in TEMP_PSY_PARAM_LINE_COLUMNS)
+    fig, axes = plt.subplots(
+        n_rows,
+        len(TEMP_PSY_PARAM_LINE_COLUMNS),
+        figsize=(12.0, 3.3 * n_rows),
+        squeeze=False,
+    )
+
+    for col_i, col_specs in enumerate(TEMP_PSY_PARAM_LINE_COLUMNS):
+        for row_i in range(n_rows):
+            ax = axes[row_i, col_i]
+            if row_i >= len(col_specs):
+                ax.axis("off")
+                continue
+
+            metric, label = col_specs[row_i]
+            metric_df = metrics[metrics["metric"].astype(str) == metric].copy()
+            for view_name in view_names:
+                color = view_colors.get(view_name, GENOTYPE_COLORS.get(view_name, "0.35"))
+                for condition_i, condition in enumerate(condition_order):
+                    xs = []
+                    means = []
+                    sems = []
+                    for duration_group in duration_groups:
+                        sub = metric_df[
+                            (metric_df["view"].astype(str) == view_name)
+                            & (metric_df["block_condition"].astype(str) == condition)
+                            & (metric_df["duration_group"].astype(str) == duration_group)
+                        ].copy()
+                        values = pd.to_numeric(sub["value"], errors="coerce").dropna().to_numpy(dtype=float)
+                        if len(values) == 0:
+                            continue
+                        xs.append(duration_positions[(condition, duration_group)])
+                        means.append(float(np.mean(values)))
+                        sems.append(float(sem(values)))
+
+                    if not xs:
+                        continue
+                    xs_arr = np.asarray(xs, dtype=float)
+                    means_arr = np.asarray(means, dtype=float)
+                    sems_arr = np.asarray(sems, dtype=float)
+                    order = np.argsort(xs_arr)
+                    xs_arr = xs_arr[order]
+                    means_arr = means_arr[order]
+                    sems_arr = sems_arr[order]
+
+                    ax.plot(
+                        xs_arr,
+                        means_arr,
+                        color=color,
+                        marker="o",
+                        markersize=5.5,
+                        linewidth=1.8,
+                        label=view_pretty.get(view_name, view_name) if condition_i == 0 else None,
+                        zorder=4,
+                    )
+                    ax.fill_between(
+                        xs_arr,
+                        means_arr - sems_arr,
+                        means_arr + sems_arr,
+                        color=color,
+                        alpha=0.16,
+                        linewidth=0,
+                        zorder=2,
+                    )
+
+            if metric in {"bias_b", "asymmetry_1_minus_d_minus_c"}:
+                ax.axhline(0, color="0.55", linestyle="--", linewidth=1.0, zorder=0)
+            ax.set_ylabel(label, fontsize=fs, color="black")
+            ax.set_xticks(tick_positions)
+            ax.set_xticklabels(tick_labels, rotation=35, ha="center", fontsize=max(8, fs - 3))
+            is_bottom_visible_panel = row_i == len(col_specs) - 1
+            if is_bottom_visible_panel:
+                ax.tick_params(axis="x", bottom=True, labelbottom=True)
+                for condition, center in condition_centers.items():
+                    group_label = ax.text(
+                        center,
+                        0,
+                        BLOCK_CONDITION_PRETTY.get(condition, condition),
+                        transform=ax.get_xaxis_transform()
+                        + ScaledTranslation(0, -42 / 72, fig.dpi_scale_trans),
+                        ha="center",
+                        va="top",
+                        fontsize=max(8, fs - 2),
+                        clip_on=False,
+                    )
+                    group_label.set_in_layout(False)
+            else:
+                ax.tick_params(axis="x", bottom=False, labelbottom=False)
+            ax.tick_params(axis="y", labelsize=fs)
+            ax.grid(True, axis="x", linestyle=":", alpha=0.25)
+            for spine in ["right", "top"]:
+                ax.spines[spine].set_visible(False)
+
+    handles = [
+        Line2D(
+            [],
+            [],
+            color=view_colors.get(view_name, GENOTYPE_COLORS.get(view_name, "0.35")),
+            marker="o",
+            linestyle="-",
+            label=view_pretty.get(view_name, view_name),
+        )
+        for view_name in view_names
+    ]
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.01),
+        ncol=max(1, len(handles)),
+        fontsize=fs,
+        frameon=False,
+    )
+    fig.suptitle(
+        f"TEMPORARY: biased block slope options, genotype mean lines - mean of ABLs {_abls_title(include_abls)}",
+        fontsize=fs,
+        y=0.995,
+    )
+    fig.tight_layout(rect=[0, 0.08, 1, 0.96])
+    if show:
+        plt.show()
+
+    return {
+        "summary": {
+            "figure": fig,
+            "metrics": metrics,
+            "abls": include_abls,
+            "duration_groups": STIMDUR_SUMMARY_GROUPS,
+            "temporary_slope_options": True,
+            "line_summary": True,
+        }
+    }
+
+
+def plot_biased_block_stimdur_collapsed_temp_lines(
+    *,
+    bundle: dict[str, Any],
+    show: bool = True,
+    abls: int | list[int] | tuple[int, ...] = (20, 40, 60),
+) -> dict[str, Any]:
+    """Temporary left/right-collapsed slope-options layout with genotype mean lines."""
+    style = bundle["style"]
+    view_pretty = bundle.get("view_pretty", {})
+    view_colors = bundle.get("view_colors", {})
+    include_abls = _normalize_abls(abls)
+    metrics = _collect_biased_block_stimdur_collapsed_temp_params(
+        bundle,
+        include_abls=include_abls,
+    )
+    if metrics.empty:
+        raise ValueError("No collapsed biased-block stim-duration temporary metrics were available.")
+
+    view_names: list[str] = []
+    for condition in ("rightward", "leftward"):
+        for view in bundle.get("condition_views", {}).get(condition, []):
+            if view.name not in view_names:
+                view_names.append(view.name)
+    if not view_names:
+        view_names = sorted(metrics["view"].dropna().astype(str).unique())
+
+    duration_groups = [name for name in STIMDUR_SUMMARY_GROUPS if name in set(metrics["duration_group"].astype(str))]
+    duration_positions = {duration_group: duration_i for duration_i, duration_group in enumerate(duration_groups)}
+    tick_positions = [duration_positions[duration_group] for duration_group in duration_groups]
+
+    fs = style.legend_fs
+    n_rows = max(len(col_specs) for col_specs in TEMP_PSY_PARAM_COLLAPSED_LINE_COLUMNS)
+    fig, axes = plt.subplots(
+        n_rows,
+        len(TEMP_PSY_PARAM_COLLAPSED_LINE_COLUMNS),
+        figsize=(12.0, 3.3 * n_rows),
+        squeeze=False,
+    )
+
+    for col_i, col_specs in enumerate(TEMP_PSY_PARAM_COLLAPSED_LINE_COLUMNS):
+        for row_i in range(n_rows):
+            ax = axes[row_i, col_i]
+            if row_i >= len(col_specs):
+                ax.axis("off")
+                continue
+
+            metric, label = col_specs[row_i]
+            metric_df = metrics[metrics["metric"].astype(str) == metric].copy()
+            for view_name in view_names:
+                color = view_colors.get(view_name, GENOTYPE_COLORS.get(view_name, "0.35"))
+                xs = []
+                means = []
+                sems = []
+                for duration_group in duration_groups:
+                    sub = metric_df[
+                        (metric_df["view"].astype(str) == view_name)
+                        & (metric_df["duration_group"].astype(str) == duration_group)
+                    ].copy()
+                    values = pd.to_numeric(sub["value"], errors="coerce").dropna().to_numpy(dtype=float)
+                    if len(values) == 0:
+                        continue
+                    xs.append(duration_positions[duration_group])
+                    means.append(float(np.mean(values)))
+                    sems.append(float(sem(values)))
+
+                if not xs:
+                    continue
+                xs_arr = np.asarray(xs, dtype=float)
+                means_arr = np.asarray(means, dtype=float)
+                sems_arr = np.asarray(sems, dtype=float)
+                order = np.argsort(xs_arr)
+                xs_arr = xs_arr[order]
+                means_arr = means_arr[order]
+                sems_arr = sems_arr[order]
+
+                ax.plot(
+                    xs_arr,
+                    means_arr,
+                    color=color,
+                    marker="o",
+                    markersize=5.5,
+                    linewidth=1.8,
+                    label=view_pretty.get(view_name, view_name),
+                    zorder=4,
+                )
+                ax.fill_between(
+                    xs_arr,
+                    means_arr - sems_arr,
+                    means_arr + sems_arr,
+                    color=color,
+                    alpha=0.16,
+                    linewidth=0,
+                    zorder=2,
+                )
+
+            if metric in {"bias_b_collapsed", "asymmetry_1_minus_d_minus_c_collapsed"}:
+                ax.axhline(0, color="0.55", linestyle="--", linewidth=1.0, zorder=0)
+            ax.set_ylabel(label, fontsize=fs, color="black")
+            ax.set_xticks(tick_positions)
+            ax.set_xticklabels(duration_groups, rotation=35, ha="center", fontsize=max(8, fs - 3))
+            is_bottom_visible_panel = row_i == len(col_specs) - 1
+            if is_bottom_visible_panel:
+                ax.tick_params(axis="x", bottom=True, labelbottom=True)
+            else:
+                ax.tick_params(axis="x", bottom=False, labelbottom=False)
+            ax.tick_params(axis="y", labelsize=fs)
+            ax.grid(True, axis="x", linestyle=":", alpha=0.25)
+            for spine in ["right", "top"]:
+                ax.spines[spine].set_visible(False)
+
+    handles = [
+        Line2D(
+            [],
+            [],
+            color=view_colors.get(view_name, GENOTYPE_COLORS.get(view_name, "0.35")),
+            marker="o",
+            linestyle="-",
+            label=view_pretty.get(view_name, view_name),
+        )
+        for view_name in view_names
+    ]
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.01),
+        ncol=max(1, len(handles)),
+        fontsize=fs,
+        frameon=False,
+    )
+    fig.suptitle(
+        f"TEMPORARY: left/right-collapsed biased block metrics - mean of ABLs {_abls_title(include_abls)}",
+        fontsize=fs,
+        y=0.995,
+    )
+    fig.tight_layout(rect=[0, 0.08, 1, 0.96])
+    if show:
+        plt.show()
+
+    return {
+        "summary": {
+            "figure": fig,
+            "metrics": metrics,
+            "abls": include_abls,
+            "duration_groups": STIMDUR_SUMMARY_GROUPS,
+            "temporary_slope_options": True,
+            "left_right_collapsed": True,
+            "line_summary": True,
+        }
+    }
+
+
 def plot_biased_block_stimdur_comparison(
     *,
     bundle: dict[str, Any],
     plot_mode: str = "by_view",
     show: bool = True,
-    abls: list[int] | tuple[int, ...] = (20, 40, 60),
+    abls: int | list[int] | tuple[int, ...] = (20, 40, 60),
     absilds: list[int] | tuple[int, ...] = (1, 2, 4, 8, 16),
     xlim: tuple[float, float] = (0.0, 0.5),
     debug: bool = False,
 ) -> dict[str, Any]:
+    abls = _normalize_abls(abls)
     figures: dict[str, Any] = {}
+
+    if plot_mode in {"block_condition_summary", "bias_pc_jnd", "block_condition_bias_pc_jnd"}:
+        fig_payload = plot_biased_block_stimdur_summary_metrics(bundle=bundle, show=show, abls=abls)
+        figures["block_condition_summary"] = fig_payload
+        return {"figures": figures, **bundle}
+
+    if plot_mode in {"block_condition_params", "psy_params", "block_condition_psy_params"}:
+        fig_payload = plot_biased_block_stimdur_psy_params(bundle=bundle, show=show, abls=abls)
+        figures["block_condition_params"] = fig_payload
+        return {"figures": figures, **bundle}
+
+    if plot_mode in {
+        "block_condition_params_temp_slope",
+        "temporary_slope_options",
+        "block_condition_params_temporary_slope",
+    }:
+        fig_payload = plot_biased_block_stimdur_psy_params(
+            bundle=bundle,
+            show=show,
+            temporary_slope_options=True,
+            abls=abls,
+        )
+        figures["block_condition_params_temp_slope"] = fig_payload
+        return {"figures": figures, **bundle}
+
+    if plot_mode in {
+        "block_condition_params_temp_slope_lines",
+        "temporary_slope_lines",
+        "block_condition_params_temporary_slope_lines",
+    }:
+        fig_payload = plot_biased_block_stimdur_temp_slope_lines(
+            bundle=bundle,
+            show=show,
+            abls=abls,
+        )
+        figures["block_condition_params_temp_slope_lines"] = fig_payload
+        return {"figures": figures, **bundle}
+
+    if plot_mode in {
+        "block_condition_params_temp_collapsed_lines",
+        "temporary_slope_collapsed_lines",
+        "block_condition_params_temporary_collapsed_lines",
+    }:
+        fig_payload = plot_biased_block_stimdur_collapsed_temp_lines(
+            bundle=bundle,
+            show=show,
+            abls=abls,
+        )
+        figures["block_condition_params_temp_collapsed_lines"] = fig_payload
+        return {"figures": figures, **bundle}
 
     if plot_mode == "condition_by_stimdur":
         figures["condition_by_stimdur"] = {}
@@ -940,6 +2171,11 @@ def plot_biased_block_stimdur_comparison(
         "metric_grid_by_stimdur",
         "psychometric_grid_by_condition",
         "psychometric_grid_all_conditions",
+        "block_condition_summary",
+        "block_condition_params",
+        "block_condition_params_temp_slope",
+        "block_condition_params_temp_slope_lines",
+        "block_condition_params_temp_collapsed_lines",
     }
     if plot_mode not in valid_modes:
         raise ValueError(f"plot_mode must be one of {sorted(valid_modes)}.")
