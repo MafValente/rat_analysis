@@ -98,8 +98,8 @@ def fit_and_plot_psychometric(xData, yData, model,
             parmax   = [max(xData), 10.0, 0.5, 0.5]
         elif model=="my_psycho":
             parstart = [1, 0, 0.05, 0.95]  # [slope, bias, c, d]
-            parmin   = [0.1, min(xData), 0, 0.5]
-            parmax   = [10.0, max(xData), 0.5, 1]
+            parmin   = [0.1, min(xData), 0, 0]
+            parmax   = [10.0, max(xData), 1, 1]
 
     # fit
     """ 
@@ -135,10 +135,17 @@ def fit_and_plot_psychometric(xData, yData, model,
     }
     psyfun = dispatcher[model]
 
-    if model in ["erf_4par", "my_psycho"]:
+    if model == "my_psycho":
         p0 = [1.0, 0.0, 0.05, 0.95]  # adjust to your model’s parameter meaning
+        bounds = ([0.1, min(xData), 0, 0],
+                [10.0, max(xData), 1, 1])
+        psyfun = dispatcher[model]
+        pars, _ = curve_fit(psyfun, xData, yData, p0=p0, bounds=bounds)
+        L = np.nan
+    elif model == "erf_4par":
+        p0 = [1.0, 0.0, 0.05, 0.95]
         bounds = ([0.1, min(xData), 0, 0.5],
-                [10.0, max(xData), 0.5, 1])
+                  [10.0, max(xData), 0.5, 1])
         psyfun = dispatcher[model]
         pars, _ = curve_fit(psyfun, xData, yData, p0=p0, bounds=bounds)
         L = np.nan

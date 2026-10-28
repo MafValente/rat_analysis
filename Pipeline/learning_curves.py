@@ -429,6 +429,9 @@ def plot_time_in_level_boxplot(
     time_unit: str = "hour",
     show: bool = True,
     annotate_median_split: bool | str = False,
+    show_unreached_total_time: bool = False,
+    unreached_endpoint_level: int = 16,
+    unreached_exclude_animals: list[str] | tuple[str, ...] | set[str] | None = None,
 ) -> plt.Figure | None:
     views = views or bundle["views"]
     style: PlotStyle = bundle["style"]
@@ -443,10 +446,12 @@ def plot_time_in_level_boxplot(
     step = cluster_width / n_views
     annotation_rows: list[dict[str, Any]] = []
     annotation_mode = str(annotate_median_split).strip().lower() if isinstance(annotate_median_split, str) else ""
+    unreached_exclude = {str(animal).strip() for animal in (unreached_exclude_animals or [])}
     all_values = pd.to_numeric(df_plot[time_col], errors="coerce").dropna()
     y_span = float(all_values.max() - all_values.min()) if not all_values.empty else 1.0
     if not np.isfinite(y_span) or y_span <= 0:
         y_span = 1.0
+    unreached_marker_rows: list[dict[str, Any]] = []
 
     for view_i, view in enumerate(views):
         color = bundle["view_colors"].get(view.name, f"C{view_i % 10}")
@@ -512,6 +517,58 @@ def plot_time_in_level_boxplot(
             ),
         )
 
+        if show_unreached_total_time:
+            view_df = view.selector(bundle["df"])
+            if not view_df.empty and {SUBJECT_COL, LEVEL_COL}.issubset(view_df.columns):
+                levels_by_subject = (
+                    view_df.assign(_level=pd.to_numeric(view_df[LEVEL_COL], errors="coerce"))
+                    .groupby(SUBJECT_COL, dropna=False)["_level"]
+                    .max()
+                )
+                unreached_subjects = [
+                    str(subject).strip()
+                    for subject, max_level in levels_by_subject.items()
+                    if pd.notna(max_level)
+                    and float(max_level) < float(unreached_endpoint_level)
+                    and str(subject).strip() not in unreached_exclude
+                ]
+                if unreached_subjects:
+                    view_time = df_plot[df_plot["view"] == view.name].copy()
+                    totals = (
+                        view_time[view_time[SUBJECT_COL].astype(str).str.strip().isin(unreached_subjects)]
+                        .groupby(SUBJECT_COL, dropna=False)[time_col]
+                        .sum()
+                        .dropna()
+                    )
+                    if not totals.empty:
+                        x = len(levels) + (view_i - (n_views - 1) / 2) * step
+                        unreached_marker_rows.append(
+                            {
+                                "x": x,
+                                "y": totals.to_numpy(dtype=float),
+                                "color": color,
+                                "label": bundle["view_labels"].get(view.name, view.name),
+                            }
+                        )
+
+    if show_unreached_total_time and unreached_marker_rows:
+        rng = np.random.default_rng(0)
+        for row_i, row in enumerate(unreached_marker_rows):
+            y = np.asarray(row["y"], dtype=float)
+            jitter = rng.uniform(-step * 0.18, step * 0.18, size=len(y))
+            ax.scatter(
+                np.full(len(y), row["x"]) + jitter,
+                y,
+                marker="X",
+                s=70,
+                facecolors="none",
+                edgecolors=row["color"],
+                linewidths=1.8,
+                alpha=0.95,
+                zorder=5,
+                label="Not reached L16 total" if row_i == 0 else None,
+            )
+
     if annotate_median_split:
         for row in annotation_rows:
             ax.text(
@@ -527,8 +584,13 @@ def plot_time_in_level_boxplot(
                 zorder=10,
             )
 
-    ax.set_xticks(range(len(levels)))
-    ax.set_xticklabels(levels)
+    xticks = list(range(len(levels)))
+    xticklabels = [str(level) for level in levels]
+    if show_unreached_total_time and unreached_marker_rows:
+        xticks.append(len(levels))
+        xticklabels.append(f"Not reached\nL{unreached_endpoint_level}\ntotal")
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticklabels)
     ax.set_xlabel("Training level", fontsize=style.label_fs)
     unit_label = {"sec": "seconds", "min": "minutes", "hour": "hours"}[time_unit]
     ax.set_ylabel(f"Total time at level ({unit_label})", fontsize=style.label_fs)
@@ -539,10 +601,27 @@ def plot_time_in_level_boxplot(
         y_min, y_max = ax.get_ylim()
         top_label = max(float(row["y"]) for row in annotation_rows)
         ax.set_ylim(y_min, max(y_max, top_label + 0.12 * y_span))
+    if show_unreached_total_time and unreached_marker_rows:
+        y_min, y_max = ax.get_ylim()
+        top_marker = max(float(np.nanmax(row["y"])) for row in unreached_marker_rows if len(row["y"]))
+        ax.set_ylim(y_min, max(y_max, top_marker + 0.08 * y_span))
     handles = [
         Line2D([0], [0], color=bundle["view_colors"].get(view.name, f"C{i % 10}"), lw=4, label=bundle["view_labels"].get(view.name, view.name))
         for i, view in enumerate(views)
     ]
+    if show_unreached_total_time and unreached_marker_rows:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                marker="X",
+                linestyle="none",
+                markerfacecolor="none",
+                markeredgecolor="black",
+                markersize=8,
+                label=f"Not reached L{unreached_endpoint_level}: total worked so far",
+            )
+        )
     ax.legend(handles=handles, fontsize=style.legend_fs, frameon=False)
     for spine in ["right", "top"]:
         ax.spines[spine].set_visible(False)
@@ -560,6 +639,9 @@ def plot_learning_curve_figures(
     time_unit: str = "hour",
     show: bool = True,
     annotate_median_split: bool | str = False,
+    show_unreached_total_time: bool = False,
+    unreached_endpoint_level: int = 16,
+    unreached_exclude_animals: list[str] | tuple[str, ...] | set[str] | None = None,
 ) -> dict[str, Any]:
     views = views or bundle["views"]
     figures: dict[str, Any] = {}
@@ -576,6 +658,9 @@ def plot_learning_curve_figures(
             time_unit=time_unit,
             show=show,
             annotate_median_split=annotate_median_split,
+            show_unreached_total_time=show_unreached_total_time,
+            unreached_endpoint_level=unreached_endpoint_level,
+            unreached_exclude_animals=unreached_exclude_animals,
         )
     elif mode == "all":
         figures["training_level_colormap"] = plot_training_level_colored_curves(bundle, views=views, show=show)
@@ -586,6 +671,9 @@ def plot_learning_curve_figures(
             time_unit=time_unit,
             show=show,
             annotate_median_split=annotate_median_split,
+            show_unreached_total_time=show_unreached_total_time,
+            unreached_endpoint_level=unreached_endpoint_level,
+            unreached_exclude_animals=unreached_exclude_animals,
         )
     else:
         raise ValueError("plot_mode must be one of: training_level_colormap, time_in_level_scatter, time_in_level_boxplot, all.")

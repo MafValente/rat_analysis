@@ -36,6 +36,9 @@ class FilterConfig:
     session_min: int = 13
     drop_repeat_trials: bool = True
     session_type_values: Optional[Sequence[int]] = (2,)  # << restrict to session_type==2
+    # None applies globally; by default only CNTNAP2 cohort2 has a session cutoff.
+    session_min_datasets: Optional[Sequence[tuple[str, str]]] = (("CNTNAP2", "cohort2"),)
+
 
 @dataclass(frozen=True)
 class PlotStyle:

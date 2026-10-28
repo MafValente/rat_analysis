@@ -1,0 +1,101 @@
+animal - Animal identifier
+batch - Recorded animal line label; there might be misspeallings like cntnaqp (i usually do not make use of this).
+experimenter - Initials of the person running the session.
+version - Acquisition/task software version recorded for the trial.
+bias - Bias value logged by the task code.
+repeated_trial - Task repetition flag. The analysis interprets True as a trial that triggers repetition of the NEXT trial, excluding CNP and Fixation aborts - so i exclude the trials after this when TRUE
+trial - Trial number recorded within the session.
+trial_start - Absolute trial-start timestamp, in seconds on the acquisition clock; clock epoch is not documented here.
+tared_trial_start - Trial-start time relative to the beginning of the session, in seconds.
+trial_end - Absolute trial-end timestamp on the acquisition clock, in seconds.
+trial_duration - Elapsed trial duration in seconds (trial_end minus trial_start).
+block - Trial-block number within the session.
+training_level - Numeric training-stage code. level 16 is the final one.
+trials_per_block - Recorded trials-per-block setting; the code mishandles partial blocks - a session restart will be labelled as block 1 again. To be fixed in the future.
+session - Session number per animal, starting at 1.
+session_type - Task/session-type code. 1 - standard RT condition; 2 - short-duration condition; 23 - short durations in biased blocks.
+box - Behavioural setup/box identifier.
+ABL - Average binaural sound level, in dB.
+ILD - Interaural level difference, in dB. 
+sound_index - Index identifying the selected sound in the task's sound set; mapping can depend on task version/session type.
+left_amp - Recorded left-channel sound amplitude setting; 
+right_amp - Recorded right-channel sound amplitude setting;
+is_short_sound - Short-sound indicator (1 = short, 0 = standard/long).
+short_duration - Short-sound duration in milliseconds; 8, 16, 32 and 64, with 0 for standard/RT trials.
+sound_ramp_time - Sound ramp duration in seconds (5 ms).
+intended_iti - Intended inter-trial interval, in seconds.
+iti_start - Absolute inter-trial-interval start timestamp, in seconds on the acquisition clock.
+iti_end - Absolute inter-trial-interval end timestamp, in seconds on the acquisition clock.
+iti_duration - Measured inter-trial-interval duration, in seconds.
+cnp_start - Absolute central nose-poke event/start timestamp, in seconds on the acquisition clock.
+cnp_time - Latency to central nose poke from trial start, in seconds.
+max_cnp - Maximum allowed time to initiate the central nose poke, in seconds.
+base_ft - Base fixation-time setting, milliseconds; 
+ft_exp_mean - Mean parameter for the exponential component of fixation time, milliseconds
+intended_fix_time - Intended fixation duration, in milliseconds, as used by the plotting code.
+fix_time - Measured fixation duration, in milliseconds, as used by the plotting code.
+total_fix_time - Total fixation duration logged by the task, in milliseconds; exact distinction from fix_time is lost on me - to fix.
+catch_trial - Catch-trial indicator. The catch-trial procedure is not defined.
+base_rt - Base/minimum reaction-time setting, seconds;
+max_rt - Maximum reaction-time setting, in seconds, 10.
+rt_start - Absolute start timestamp of the reaction-time interval, in seconds on the acquisition clock.
+timed_rt - Measured reaction time, in seconds.
+max_mt - Maximum movement-time setting, in seconds
+mt_start - Absolute start timestamp of the movement-time interval, in seconds on the acquisition clock.
+timed_mt - Measured movement time, in seconds, associated with movement from the central poke to the response poke.
+intended_lnp - Intended lateral nose-poke duration, in seconds
+lnp_start - Absolute lateral nose-poke start timestamp, in seconds on the acquisition clock.
+lnp_end - Absolute lateral nose-poke end timestamp, in seconds on the acquisition clock.
+timed_lnp - Measured lateral nose-poke duration, in seconds.
+response_poke - Chosen response side: +1 = right, -1 = left. Missing when no response was recorded.
+success - Trial outcome code. 1 - correct/successful; 0 - abort; and -1 - error
+abort_type - Recorded abort reason,CNP, Fixation, LNP, RT-, MT+ and MT-.
+block_perf - Task-recorded block performance proportion;
+block_abort_ratio - Task-recorded fraction of aborted trials within a block;
+incorrect_penalty - Timeout/penalty duration for an incorrect response, seconds.
+abort_penalty - General abort timeout/penalty duration, seconds.
+ft_abort_penalty - Fixation-abort timeout/penalty duration, seconds.
+reward_left - Configured reward amount/setting for the left side; 
+reward_right - Configured reward amount/setting for the right side; 
+reward_delivered - Boolean flag indicating whether reward delivery was recorded.
+opto_trial - Boolean optogenetic-trial flag; all entries are False.
+intended_opto_onset_time - Intended optogenetic onset time 
+timed_opto_onset_time - Recorded optogenetic onset timing 
+opto_duration - Logged optogenetic-duration field; 
+opto_mode - Optogenetic mode field 
+ramp_mode - Ramp mode field, opto
+ramp_time - Ramp timing setting, opto
+opto_onset - Optogenetic onset event/phase setting;
+opto_delay - Optogenetic onset delay setting; 
+led0_voltage - LED channel 0 voltage setting
+led0_power - LED channel 0 optical-power setting
+led0_pulses - LED channel 0 pulse setting
+led0_frequency - LED channel 0 pulse-frequency setting
+led0_duty_cycle - LED channel 0 duty-cycle setting
+led1_voltage - LED channel 1 voltage setting
+led1_power - LED channel 1 optical-power setting
+led1_pulses - LED channel 1 pulse setting
+led1_frequency - LED channel 1 pulse-frequency setting 
+led1_duty_cycle - LED channel 1 duty-cycle setting
+base_ft_oot - Legacy base fixation-time parameter for the OOT component
+ft_oot_exp - Legacy exponential fixation-time parameter for the OOT component 
+intended_ft_oot - Legacy intended fixation duration for the OOT component
+timed_ft_oot - Legacy measured fixation duration for the OOT component
+base_ft_sot - Legacy base fixation-time parameter for the SOT component
+ft_sot_exp - Legacy exponential fixation-time parameter for the SOT component
+intended_ft_sot - Legacy intended fixation duration for the SOT component
+duration_ft_sot - Legacy recorded fixation duration for the SOT component
+trial_start_frame - Frame index logged for trial start
+cnp_start_frame - Frame index logged for central nose-poke start; 
+rt_start_frame - Frame index logged for reaction-time interval start;
+mt_start_frame - Frame index logged for movement-time interval start;
+lnp_start_frame - Frame index logged for lateral nose-poke start;
+trial_end_frame - Frame index logged for trial end;
+lnp_end_frame - Frame index logged for lateral nose-poke end;
+stim_dur - Derived stimulus-duration category in milliseconds. Legacy mapping for session_type=2: sound_index 12-16 -> 15, 17-21 -> 60, 22-26 -> 120; otherwise 6000 is the RT-condition placeholder, not a measured duration. All cohort 4 values are 6000 despite short_duration containing short sounds; this annotation does not capture those short trials.
+stim_dur_label - Label derived from stim_dur: RT for 6000, otherwise duration followed by ms. All cohort 4 entries are RT; see the discrepancy described for stim_dur.
+source_file - Original daily CSV filename retained by the merge pipeline.
+source_date - Session/source date inferred from the source filename by the merge pipeline, stored as YYYY-MM-DD.
+rt_value_valid - RT-quality flag: False for trials selected by configured RT-recording correction rules, which also blank timed_rt; True otherwise. True does not guarantee a nonmissing RT or a successful trial.
+rt_value_note - Reason attached by an RT-quality correction rule; populated cohort 4 entries say setup 2 RT value recording issue.
+timed_ft_sot - Additional legacy measured fixation-duration field for the SOT component (inferred). Relationship to duration_ft_sot and units are unverified.

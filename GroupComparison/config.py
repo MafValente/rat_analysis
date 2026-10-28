@@ -17,7 +17,7 @@ class ViewSpec:
 
 @dataclass(frozen=True)
 class FilterConfig:
-    training_min: int = 16
+    training_min: Optional[int] = 16
     session_min: int = 13
     drop_repeat_trials: bool = True
 
@@ -27,6 +27,8 @@ class FilterConfig:
     short_duration_values: Optional[Sequence[int]] = None # e.g. [0, 8, 16, 32, 64, 120]
     stim_dur_values: Optional[Sequence[int]] = None       # legacy/raw duration filter, e.g. [6000]
     sessiontype_or_stimdur: str = "or"  # "or" or "and"
+    # None applies globally; by default only CNTNAP2 cohort2 has a session cutoff.
+    session_min_datasets: Optional[Sequence[tuple[str, str]]] = (("CNTNAP2", "cohort2"),)
 
 
 @dataclass(frozen=True)

@@ -26,6 +26,7 @@ def plot_views_3x3(
     group_jnd_by_view,
     view_colors,
     add_jnd_inset=True,
+    rt_shaded_sem=False,
 ) -> plt.Figure:
     """
     Rows = views (genotypes), Cols = RT/MT/Psy
@@ -46,7 +47,13 @@ def plot_views_3x3(
         abls_v = sorted(tables["rt_group"]["ABL"].unique())
         for abl in abls_v:
             c = abl_colors.get(abl, "gray")
-            plot_rt_on_ax(ax_rt, tables, abl, c, cfg)
+            if rt_shaded_sem:
+                rt_df = tables["rt_group"]
+                _plot_chrono_mean_shaded(
+                    ax_rt, rt_df[rt_df["ABL"] == abl], color=c, cfg=cfg,
+                )
+            else:
+                plot_rt_on_ax(ax_rt, tables, abl, c, cfg)
             plot_mt_on_ax(ax_mt, tables, abl, c, cfg)
             plot_psy_on_ax(ax_psy, tables, abl, c, cfg)
 
@@ -61,7 +68,7 @@ def plot_views_3x3(
 
         style_axes(ax_rt, style, f"{vn} — RT", "ILD (dB)", "Mean RT (s)")
         style_axes(ax_mt, style, f"{vn} — MT", "ILD (dB)", "Mean MT (s)")
-        style_axes(ax_psy, style, f"{vn} — Psychometric", "ILD (dB)", "P(Left)")
+        style_axes(ax_psy, style, f"{vn} — Psychometric", "ILD (dB)", "P(Right)")
 
         ax_rt.set_xlim(*cfg.xlim_abs)
         ax_rt.set_ylim(*cfg.ylim_rt)
@@ -142,7 +149,7 @@ def plot_abls_4x3(
 
         style_axes(ax_rt, style, f"ABL {abl} — RT", "ILD (dB)", "Mean RT (s)")
         style_axes(ax_mt, style, f"ABL {abl} — MT", "ILD (dB)", "Mean MT (s)")
-        style_axes(ax_psy, style, f"ABL {abl} — Psychometric", "ILD (dB)", "P(Left)")
+        style_axes(ax_psy, style, f"ABL {abl} — Psychometric", "ILD (dB)", "P(Right)")
 
         ax_rt.set_xlim(*cfg.xlim_abs)
         ax_rt.set_ylim(*cfg.ylim_rt)
@@ -236,10 +243,12 @@ def _plot_pooled_psychometric_on_ax(
         return
     markerfacecolor = color if markerfacecolor is None else markerfacecolor
     df = group_df.sort_values("ILD").copy()
-    x = _maybe_shift(df["ILD"], cfg)
+    # Fit in physical ILD units; compress ±50 only for displayed points.
+    x = pd.to_numeric(df["ILD"], errors="coerce").to_numpy(dtype=float)
+    display_x = _maybe_shift(x, cfg)
     y = pd.to_numeric(df["mean"], errors="coerce").to_numpy(dtype=float)
     yerr = pd.to_numeric(df["sem"], errors="coerce").to_numpy(dtype=float)
-    ax.errorbar(x, y, yerr=yerr, fmt=marker, color=color, markerfacecolor=markerfacecolor,
+    ax.errorbar(display_x, y, yerr=yerr, fmt=marker, color=color, markerfacecolor=markerfacecolor,
                 markeredgecolor=color, markersize=8.5, linewidth=0, elinewidth=1.5, capsize=3)
     finite = np.isfinite(x) & np.isfinite(y)
     if finite.sum() < 4:
@@ -315,6 +324,20 @@ def _chrono_ylim(frames: List[pd.DataFrame]) -> tuple[float, float] | None:
     return lower, upper
 
 
+def _empty_chronometric_figure(title: str) -> plt.Figure:
+    fig, ax = plt.subplots(figsize=(7, 3))
+    ax.set_axis_off()
+    ax.set_title(title, fontsize=14)
+    ax.text(
+        0.5, 0.5,
+        "No prepared data for the selected groups.\n"
+        "Check group selections and filters, then rerun preparation.",
+        ha="center", va="center", fontsize=14, transform=ax.transAxes,
+    )
+    fig.tight_layout()
+    return fig
+
+
 def plot_chronometrics(
     prepared: Dict[str, dict],
     views: List[ViewSpec],
@@ -332,11 +355,19 @@ def plot_chronometrics(
     separate_abls=False: one pooled row, columns are RT and MT.
     Always plots group means with shaded SEM, without individual animal traces.
     """
+    style = replace(style, title_fs=14, label_fs=14, tick_fs=14, legend_fs=14)
+    cfg = replace(cfg, xlim_sym=(-17, 17))
     view_names = [v.name for v in views]
+    if not any(not prepared[name]["rt_group"].empty for name in view_names):
+        return _empty_chronometric_figure("Chronometrics: no usable trials")
     if separate_abls:
         abl_rows = sorted(set().union(*[
             set(prepared[vn]["rt_group"]["ABL"].unique()) for vn in view_names
         ]))
+        # Hide the ABL 50 panel only; do not remove ±50 ILD fit points.
+        abl_rows = [abl for abl in abl_rows if float(abl) != 50]
+        if not abl_rows:
+            return _empty_chronometric_figure("No ABL panels other than 50 dB")
     else:
         abl_rows = ["All ABLs"]
 
@@ -377,14 +408,13 @@ def plot_chronometrics(
         ax_rt.set_xlim(*cfg.xlim_abs)
         ax_rt.set_xticks([0, 5, 10, 15])
         ax_mt.set_xlim(*cfg.xlim_sym)
-        ax_mt.set_xticks([-15, -10, -5, 0, 5, 10, 15])
+        ax_mt.set_xticks([-16, -4, 0, 4, 16])
         rt_ylim = _chrono_ylim(rt_frames)
         mt_ylim = _chrono_ylim(mt_frames)
         if rt_ylim is not None:
             ax_rt.set_ylim(*rt_ylim)
         if mt_ylim is not None:
             ax_mt.set_ylim(*mt_ylim)
-        ax_mt.set_xticklabels(["-15", "-10", "-5", "0", "5", "10", "15"])
 
     handles = [
         plt.Line2D(
@@ -419,11 +449,19 @@ def plot_chronometric_psychometrics(
     view_styles: Optional[Dict[str, dict]] = None,
 ) -> plt.Figure:
     """Plot psychometrics using the views and ABL treatment of the chronometric layout."""
+    style = replace(style, title_fs=14, label_fs=14, tick_fs=14, legend_fs=14)
+    cfg = replace(cfg, xlim_sym=(-17, 17))
     view_names = [view.name for view in views]
+    if not any(not prepared[name]["psy_group"].empty for name in view_names):
+        return _empty_chronometric_figure("Psychometrics: no usable trials")
     if separate_abls:
         abl_rows = sorted(set().union(*[
             set(prepared[name]["psy_group"]["ABL"].unique()) for name in view_names
         ]))
+        # Hide the ABL 50 panel only; do not remove ±50 ILD fit points.
+        abl_rows = [abl for abl in abl_rows if float(abl) != 50]
+        if not abl_rows:
+            return _empty_chronometric_figure("No ABL panels other than 50 dB")
     else:
         abl_rows = ["All ABLs"]
 
@@ -448,10 +486,11 @@ def plot_chronometric_psychometrics(
                 ax.axvline(0, color="gray", linestyle="--", alpha=0.7)
                 ax.axhline(0.5, color="gray", linestyle="--", alpha=0.7)
         row_label = f"ABL {abl}" if separate_abls else "All ABLs"
-        style_axes(ax, style, f"{row_label} - Psychometric", "ILD (dB)", "P(Left)")
+        style_axes(ax, style, f"{row_label} - Psychometric", "ILD (dB)", "P(Right)")
         ax.set_xlim(*cfg.xlim_sym)
         ax.set_ylim(0, 1)
-        apply_50_tick_labels(ax, cfg.xlim_sym)
+        ax.set_xticks([-16, -4, 0, 4, 16])
+        ax.set_xticklabels(["-16", "-4", "0", "4", "16"])
 
     handles = [
         plt.Line2D(
@@ -464,4 +503,52 @@ def plot_chronometric_psychometrics(
     ]
     fig.legend(handles, view_names, loc="upper center", bbox_to_anchor=(0.5, 0.99), ncol=1, fontsize=style.legend_fs)
     fig.tight_layout(rect=[0, 0, 1, 0.84])
+    return fig
+
+
+def plot_chronometric_jnds(
+    group_jnd_by_view: Dict[str, pd.DataFrame],
+    views: List[ViewSpec],
+    view_colors: Dict[str, str],
+    *,
+    view_styles: Optional[Dict[str, dict]] = None,
+) -> plt.Figure:
+    """Compact animal-mean JND ± SEM by ABL, reusing prepared fits.
+
+    Keep ABLs separate even when the chronometric curves pool ABLs: these
+    estimates come from each animal's per-ABL psychometric fits.
+    """
+    fig, ax = plt.subplots(figsize=(5.5, 4.5))
+    abls = set()
+    for view in views:
+        table = group_jnd_by_view.get(view.name)
+        if table is None or table.empty:
+            continue
+        table = table.sort_values("ABL")
+        table = table[np.isfinite(table["mean"])]
+        if table.empty:
+            continue
+        abls.update(table["ABL"])
+        color = view_colors.get(view.name, "gray")
+        appearance = (view_styles or {}).get(view.name, {})
+        face = appearance.get("markerfacecolor")
+        ax.errorbar(
+            table["ABL"], table["mean"],
+            yerr=table["sem"].fillna(0),
+            color=color, label=view.name,
+            linestyle=appearance.get("linestyle", "-"),
+            marker=appearance.get("marker", "o"),
+            markerfacecolor=color if face is None else face,
+            markeredgecolor=color, capsize=3,
+        )
+    style = PlotStyle(title_fs=14, label_fs=14, tick_fs=14, legend_fs=14)
+    style_axes(ax, style, "JND by ABL (mean ± SEM)", "ABL (dB)", "JND (dB)", square=False)
+    # Autoscale to the selected groups, including their SEM error bars.
+    ax.margins(y=0.15)
+    ax.set_xticks(sorted(abls))
+    if abls:
+        ax.legend(fontsize=14, frameon=False, loc="upper left", bbox_to_anchor=(1.02, 1))
+    else:
+        ax.text(0.5, 0.5, "No JND estimates for selected groups", ha="center", va="center", transform=ax.transAxes)
+    fig.tight_layout()
     return fig

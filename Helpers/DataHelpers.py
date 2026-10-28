@@ -70,27 +70,20 @@ def prepare_data(
     #   - abort_type NOT in {"Fixation", "CNP"}
     # ----------------------------
 
-    df = df.sort_values([session_col, trial_col]).copy()
-    df["trial_is_repeat"] = False
-
-    non_repeat_abort_types = {"Fixation", "CNP"}
-
-    for session_id, df_sess in df.groupby(session_col):
-        idx = df_sess.index.to_list()
-
-        for i in range(1, len(idx)):
-            prev_idx = idx[i - 1]
-            this_idx = idx[i]
-
-            prev_row = df.loc[prev_idx]
-
-            prev_triggers_repeat = (
-                bool(prev_row["repeated_trial"]) and
-                str(prev_row["abort_type"]) not in non_repeat_abort_types
-            )
-
-            if prev_triggers_repeat:
-                df.loc[this_idx, "trial_is_repeat"] = True
+    # Session numbers are reused across animals and datasets. Keep their
+    # trial histories separate when identifying the preceding trial.
+    session_keys = [
+        col for col in ("line", "cohort", "animal")
+        if col in df.columns and col != session_col
+    ] + [session_col]
+    df = df.sort_values(session_keys + [trial_col], kind="stable").copy()
+    triggers_repeat = (
+        df["repeated_trial"].astype(bool)
+        & ~df["abort_type"].astype(str).isin({"Fixation", "CNP"})
+    )
+    df["trial_is_repeat"] = triggers_repeat.groupby(
+        [df[col] for col in session_keys], sort=False, dropna=False
+    ).shift(fill_value=False).astype(bool)
 
     return df
 
@@ -1479,8 +1472,14 @@ def shift_ILD_for_ABL50(x):
 
 def compute_jnd_by_ABL(psychometric_results, skip_ABL=50):
     """
-    Compute JND (mean of 25% and 75% thresholds) from logistic psychometric fits.
-    Assumes parameters pars = [a, b, c, d].
+    Compute lapse-normalized JND from logistic psychometric fits.
+    Assumes parameters pars = [a, b, c, d] for
+    P(x) = c + (d-c) / (1 + exp(-2*a*(x-b))).
+
+    Thresholds are at c + 0.25*(d-c) and c + 0.75*(d-c).
+    JND is half their absolute ILD separation, equivalent to ln(3)/(2*abs(a)).
+    Lapses enter the fit through c and d; the threshold definition measures
+    sensitivity within that fitted response range.
 
     Parameters
     ----------
@@ -1511,7 +1510,8 @@ def compute_jnd_by_ABL(psychometric_results, skip_ABL=50):
             continue
 
         a, b, c, d = pars[:4]
-        #a = abs(a)  # make sure slope sign doesn't flip direction
+        if not np.all(np.isfinite([a, b, c, d])) or a == 0:
+            continue
 
         # Clamp asymptotes
         c = np.clip(c, 0, 1)
@@ -1521,8 +1521,8 @@ def compute_jnd_by_ABL(psychometric_results, skip_ABL=50):
             continue
 
         # Define 25% and 75% target probabilities within [c, d]
-        upper = 0.75 * (d)
-        lower = 1-((1-c) * 0.75)
+        upper = c + 0.75 * (d - c)
+        lower = c + 0.25 * (d - c)
 
         try:
             term75 = ((d - c) / (upper - c)) - 1
@@ -1531,7 +1531,7 @@ def compute_jnd_by_ABL(psychometric_results, skip_ABL=50):
                 raise ValueError("invalid term for log")
             JND75 = b - (1 / (2 * a)) * np.log(term75)
             JND25 = b - (1 / (2 * a)) * np.log(term25)
-            jnd = np.nanmean([abs(JND75 - b), abs(JND25 - b)])
+            jnd = abs(JND75 - JND25) / 2
         except Exception:
             jnd = np.nan
 

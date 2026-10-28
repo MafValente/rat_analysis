@@ -24,6 +24,9 @@ from StimDur.config import (
 )
 from StimDur.layouts import (
     plot_absild_perf_3x5_all_genotypes,
+    plot_absild_perf_all_views_by_abl,
+    plot_perf_absild_by_view_and_abl,
+    plot_perf_absild_combined_durations,
     plot_absild_perf_across_stimdur_1x3_for_view,
     plot_biased_metric_grid_for_stimdur,
     plot_block_conditions_4x3_for_stimdur_and_view,
@@ -456,6 +459,7 @@ def prepare_unbiased_stimdur_comparison(
     mixed_filter = FilterConfig(
         training_min=fcfg.training_min,
         session_min=fcfg.session_min,
+        session_min_datasets=fcfg.session_min_datasets,
         drop_repeat_trials=fcfg.drop_repeat_trials,
         session_type_values=prefilter_session_types,
     )
@@ -541,6 +545,7 @@ def prepare_biased_block_stimdur_comparison(
     biased_filter = FilterConfig(
         training_min=fcfg.training_min,
         session_min=fcfg.session_min,
+        session_min_datasets=fcfg.session_min_datasets,
         drop_repeat_trials=fcfg.drop_repeat_trials,
         session_type_values=list(biased_session_types),
     )
@@ -621,6 +626,112 @@ def prepare_biased_block_stimdur_comparison(
     }
 
 
+def prepare_biased_block_stimdur_comparison_from_blocks(
+    *,
+    df_blocks: pd.DataFrame,
+    views: list[ViewSpec],
+    stim_durs: list[int] | tuple[int, ...] = tuple(DEFAULT_STIM_DURS),
+    stimdur_col: str = STIMDUR_COL,
+    cfg: StimDurComparisonConfig | None = None,
+    fcfg: FilterConfig | None = None,
+    style: PlotStyle | None = None,
+    stimdur_pretty: dict[str, str] | None = None,
+    stimdur_colors: dict[str, str] | None = None,
+    view_colors: dict[str, str] | None = None,
+    view_pretty: dict[str, str] | None = None,
+    biased_session_types: tuple[int, ...] = (23,),
+    block_conditions: tuple[str, ...] = BLOCK_CONDITION_ORDER,
+) -> dict[str, Any]:
+    """Build biased-block stim-duration bundles from rows already labeled by Pipeline.biased_blocks."""
+    if "block_condition" not in df_blocks.columns:
+        raise KeyError("df_blocks must already include a 'block_condition' column.")
+
+    cfg = cfg or StimDurComparisonConfig(
+        error_mode="individuals",
+        skip_psy_fits=(50,),
+        ild_shift_for_abl50=True,
+    )
+    fcfg = fcfg or FilterConfig(
+        training_min=16,
+        session_min=13,
+        drop_repeat_trials=True,
+        session_type_values=list(biased_session_types),
+    )
+    style = style or PlotStyle()
+    stimdur_pretty = stimdur_pretty or STIMDUR_PRETTY
+    view_pretty = view_pretty or build_view_labels(views)
+    view_colors = view_colors or build_view_colors(views)
+
+    sess = pd.to_numeric(df_blocks.get("session_type"), errors="coerce")
+    df_labeled = df_blocks[sess.isin(list(biased_session_types))].copy()
+    df_labeled = apply_filters(df_labeled, fcfg)
+
+    per_condition_filter = FilterConfig(
+        training_min=0,
+        session_min=0,
+        drop_repeat_trials=False,
+        session_type_values=None,
+    )
+    condition_bundles: dict[str, dict[str, Any]] = {}
+    condition_views: dict[str, list[ViewSpec]] = {}
+    summary_rows: list[dict[str, Any]] = []
+
+    for condition in block_conditions:
+        df_condition = df_labeled[df_labeled["block_condition"] == condition].copy()
+        available_views = [view for view in views if not view.selector(df_condition).empty]
+        if not available_views:
+            continue
+
+        condition_bundles[condition] = prepare_stimdur_comparison(
+            df=df_condition,
+            views=available_views,
+            stim_durs=stim_durs,
+            stimdur_col=stimdur_col,
+            cfg=cfg,
+            fcfg=per_condition_filter,
+            style=style,
+            stimdur_pretty=stimdur_pretty,
+            stimdur_colors=stimdur_colors,
+            view_colors=view_colors,
+            view_pretty=view_pretty,
+        )
+        condition_views[condition] = available_views
+
+        for view in available_views:
+            df_view = view.selector(df_condition)
+            summary_rows.append(
+                {
+                    "block_condition": condition,
+                    "view": view.name,
+                    "animals": df_view["animal"].nunique() if "animal" in df_view.columns else pd.NA,
+                    "trials": len(df_view),
+                }
+            )
+
+    if not condition_bundles:
+        raise ValueError("No biased-block stim-duration data remained in the prepared biased-block rows.")
+
+    block_summary = pd.DataFrame(summary_rows)
+    if not block_summary.empty:
+        block_summary = block_summary.sort_values(["block_condition", "view"]).reset_index(drop=True)
+
+    return {
+        "df": df_labeled,
+        "df_filtered": df_labeled,
+        "condition_bundles": condition_bundles,
+        "condition_views": condition_views,
+        "block_summary": block_summary,
+        "cfg": cfg,
+        "fcfg": fcfg,
+        "style": style,
+        "stimdur_col": stimdur_col,
+        "stim_durs": list(stim_durs),
+        "view_colors": view_colors,
+        "view_pretty": view_pretty,
+        "stimdur_pretty": stimdur_pretty,
+    }
+
+
 def plot_stimdur_comparison(
     *,
     bundle: dict[str, Any],
@@ -679,7 +790,9 @@ def plot_stimdur_comparison(
             if show:
                 plt.show()
 
-    if plot_mode in {"performance_by_view", "all"}:
+    # performance_all retains the per-genotype performance figures and adds
+    # the combined ABL × ILD grid and combined-genotype ABL panels.
+    if plot_mode in {"performance_by_view", "performance_all", "all"}:
         figures["performance_by_view"] = {}
         for view in views:
             fig = plot_absild_perf_across_stimdur_1x3_for_view(
@@ -725,6 +838,23 @@ def plot_stimdur_comparison(
             view_pretty=view_pretty,
             absilds=list(absilds),
         )
+        figures["performance_all_by_abl"] = plot_absild_perf_all_views_by_abl(
+            prepared=prepared, views=views, stimdur_specs=stimdur_specs,
+            abls=list(abls), style=style, stimdur_pretty=stimdur_pretty,
+            view_pretty=view_pretty, absilds=list(absilds),
+        )
+        figures["performance_all_absild"] = plot_perf_absild_by_view_and_abl(
+            prepared=prepared, views=views, stimdur_specs=stimdur_specs,
+            abls=list(abls), style=style, stimdur_pretty=stimdur_pretty,
+            stimdur_colors=stimdur_colors, view_pretty=view_pretty,
+            absilds=list(absilds),
+        )
+        figures["performance_all_absild_combined_durations"] = plot_perf_absild_combined_durations(
+            prepared=prepared, views=views, stimdur_specs=stimdur_specs,
+            abls=list(abls), style=style, stimdur_pretty=stimdur_pretty,
+            stimdur_colors=stimdur_colors, view_pretty=view_pretty,
+            absilds=list(absilds),
+        )
         if show:
             plt.show()
 
@@ -732,7 +862,7 @@ def plot_stimdur_comparison(
     if plot_mode not in valid_modes:
         raise ValueError(f"plot_mode must be one of {sorted(valid_modes)}.")
 
-    return {"figures": figures, **bundle}
+    return {**bundle, "figures": figures}
 
 
 STIMDUR_SUMMARY_GROUPS = {

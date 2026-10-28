@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
+from analysis.datasets import apply_session_min
 
 from StimDur.config import FilterConfig, StimDurComparisonConfig, ViewSpec, StimDurSpec
 
@@ -35,8 +36,7 @@ def apply_filters(df: pd.DataFrame, fcfg: FilterConfig) -> pd.DataFrame:
     if "training_level" in df.columns:
         df = df[df["training_level"] >= fcfg.training_min].copy()
 
-    if "session" in df.columns:
-        df = df[df["session"] >= fcfg.session_min].copy()
+    df = apply_session_min(df, fcfg.session_min, fcfg.session_min_datasets)
 
     if fcfg.session_type_values is not None:
         if "session_type" not in df.columns:

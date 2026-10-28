@@ -18,6 +18,7 @@ import pandas as pd
 
 import Pipeline.biased_blocks as bb
 import Pipeline.daily_plots as daily_plots
+from Pipeline.daily_review_report import save_cohort_report
 from Pipeline.across_sessions import (
     load_change_regions,
     plot_across_sessions_combined,
@@ -194,6 +195,10 @@ def main() -> int:
     args = parse_args()
     animals = args.animals or get_animals_for_cohort(args.line, args.cohort)
 
+    if not animals:
+        raise SystemExit(f"No animals found for {args.line} {args.cohort}")
+
+    report_pages = []
     total_saved = 0
     for animal in animals:
         saved_paths = run_one_subject(
@@ -207,11 +212,17 @@ def main() -> int:
             out_root=args.out_dir,
             dpi=args.dpi,
         )
+        report_pages.append((animal, saved_paths))
         total_saved += len(saved_paths)
         print(f"{animal}: saved {len(saved_paths)} figure(s)")
         for path in saved_paths:
             print(f"  {path}")
 
+    report_path = save_cohort_report(
+        args.out_dir / args.line / args.cohort / "daily_animal_review.pdf",
+        report_pages, line=args.line, cohort=args.cohort,
+    )
+    print(f"PDF report: {report_path}")
     print(f"Completed {len(animals)} animal(s); saved {total_saved} figure(s).")
     return 0
 

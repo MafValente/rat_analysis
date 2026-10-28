@@ -1,0 +1,30 @@
+Session-Type Corrections
+Date: 2026-10-24
+
+Reason: nonzero short_duration values were present in sessions labelled session_type 1.
+Correction: the complete affected session was changed to session_type 2.
+
+- File: DataFiles/CNTNAP2_cohort3/merged_ASD0026.csv
+  Animal: ASD0026
+  Session: 41
+  Rows in session: 588
+  Rows changed: 588
+  session_type before: {'1': 588}
+  session_type after: {'2': 588}
+
+- File: DataFiles/SHANK3_cohort2/merged_ASD0073.csv
+  Animal: ASD0073
+  Session: 45
+  Rows in session: 315
+  Rows changed: 315
+  session_type before: {'1': 315}
+  session_type after: {'2': 315}
+
+- File: DataFiles/SHANK3_cohort1/merged_ASD0045.csv
+  Animal: ASD0045
+  Session: 41
+  Rows in session: 765
+  Rows changed: 765
+  session_type before: {'1': 765}
+  session_type after: {'2': 765}
+

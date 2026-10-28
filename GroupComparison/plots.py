@@ -333,7 +333,7 @@ def plot_psychometric_animals_plus_average(
             )
 
         if col == 0:
-            ax.set_ylabel("P(Left)", fontsize=style.label_fs, color="black")
+            ax.set_ylabel("P(Right)", fontsize=style.label_fs, color="black")
         if row == n_rows - 1:
             ax.set_xlabel("ILD (dB)", fontsize=style.label_fs, color="black")
 
@@ -1549,6 +1549,8 @@ def plot_jnd_comparison_per_view(
     jnd_indiv_by_view: Dict[str, "pd.DataFrame"],
     jnd_overlay: JNDOverlaySpec,
     style: PlotStyle,
+    *,
+    summary_only: bool = False,
 ):
     """
     Each view gets its own axis:
@@ -1600,7 +1602,14 @@ def plot_jnd_comparison_per_view(
 
         # --- NEW dataset (filled circles) ---
         df_new = jnd_indiv_by_view.get(vn, pd.DataFrame())
-        if df_new is not None and not df_new.empty:
+        if df_new is not None and not df_new.empty and summary_only:
+            summary = df_new.groupby("ABL")["JND"].agg(["mean", "sem"])
+            for abl, row in summary.iterrows():
+                ax.errorbar(
+                    abl, row["mean"], yerr=0 if pd.isna(row["sem"]) else row["sem"],
+                    fmt="o", color=abl_color_map.get(int(abl), "gray"), capsize=4,
+                )
+        elif df_new is not None and not df_new.empty:
             for _, r in df_new.iterrows():
                 abl = int(r["ABL"])
                 c = abl_color_map.get(abl, "gray")

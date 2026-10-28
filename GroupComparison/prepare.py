@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
+from analysis.datasets import apply_session_min
 
 from .config import ViewSpec, FilterConfig, GroupComparisonConfig
 
@@ -28,11 +29,10 @@ def apply_filters(df: pd.DataFrame, fcfg: FilterConfig) -> pd.DataFrame:
     if fcfg.drop_repeat_trials and "trial_is_repeat" in df.columns:
         df = df[df["trial_is_repeat"] == False].copy()
 
-    if "training_level" in df.columns:
+    if fcfg.training_min is not None and "training_level" in df.columns:
         df = df[df["training_level"] >= fcfg.training_min].copy()
 
-    if "session" in df.columns:
-        df = df[df["session"] >= fcfg.session_min].copy()
+    df = apply_session_min(df, fcfg.session_min, fcfg.session_min_datasets)
 
     # ----------restrict to session_type OR/AND duration ----------
     if (
@@ -313,10 +313,16 @@ def prep_psy(
     return points, psy_group, per_subject_curves, mean_fits, jnd_indiv, params
 
 
-def build_prepared(df: pd.DataFrame, views: List[ViewSpec], cfg: GroupComparisonConfig) -> Dict[str, dict]:
+def build_prepared(
+    df: pd.DataFrame, views: List[ViewSpec], cfg: GroupComparisonConfig,
+    *, progress: bool = False,
+) -> Dict[str, dict]:
     prepared: Dict[str, dict] = {}
     for v in views:
         df_v = v.selector(df)
+        if progress:
+            print(f"Preparing {v.name}: {len(df_v):,} trials, "
+                  f"{df_v['animal'].nunique()} animals (including psychometric fits)...", flush=True)
         rt_per_subj, rt_group = prep_rt(df_v)
         mt_per_subj, mt_group = prep_mt(df_v)
 

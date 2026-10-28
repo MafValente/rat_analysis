@@ -868,7 +868,8 @@ def plot_absild_perf_across_stimdur_1x3_for_view(
         ax.set_title(f"{view_name} — ABL {abl}", fontsize=style.title_fs, pad=style.title_pad)
         ax.set_xticks(x)
         ax.set_xticklabels(xticklabels, rotation=30, ha="right", fontsize=style.tick_fs)
-        ax.set_ylim(0, 1)
+        ax.set_ylim(0.4, 1)
+        ax.set_yticks([0.5, 0.75, 1.0])
         ax.set_ylabel("P(correct)", fontsize=style.label_fs)
         style_axes(ax, style)
 
@@ -978,7 +979,8 @@ def plot_absild_perf_3x5_all_genotypes(
                 ax.set_xticklabels(xticklabels, rotation=30, ha="right", fontsize=style.tick_fs)
             else:
                 ax.tick_params(labelbottom=False)
-            ax.set_ylim(0, 1)
+            ax.set_ylim(0.4, 1)
+            ax.set_yticks([0.5, 0.75, 1.0])
             if c == 0:
                 ax.set_ylabel("P(correct)", fontsize=style.label_fs)
             style_axes(ax, style, square=False)
@@ -1168,4 +1170,251 @@ def plot_kreg_4x3_by_abl_for_view(
             f"Try widening xlim (e.g., xlim=(0,1.5)) or passing xxi that spans your RT range."
         )
 
+    return fig
+
+
+def plot_absild_perf_all_views_by_abl(
+    prepared, views, stimdur_specs, abls, style,
+    stimdur_pretty=None, view_pretty=None, absilds=(1, 2, 4, 8, 16),
+) -> plt.Figure:
+    """One panel per ABL: colour encodes |ILD|, line/marker encode view."""
+    from matplotlib.lines import Line2D
+
+    abls = list(abls)
+    absilds = list(absilds)
+    if not abls or not views:
+        raise ValueError("Select at least one ABL and one group for performance plots.")
+    pretty = stimdur_pretty or {}
+    labels = view_pretty or {}
+    names = [s.name for s in stimdur_specs]
+    x = np.arange(len(names))
+    summaries = {
+        (v.name, name): _get_or_build_absild_summary(prepared[v.name][name])
+        for v in views for name in names
+    }
+    colors = {ild: f"C{i % 10}" for i, ild in enumerate(absilds)}
+    patterns = [("-", "o"), ("--", "s"), (":", "^"), ("-.", "D")]
+    appearances = {}
+    for i, view in enumerate(views):
+        genotype = view.name.lower().split()[-1]
+        appearances[view.name] = {
+            "wt": ("-", "o"), "hom": ("--", "s"), "het": (":", "^"),
+        }.get(genotype, patterns[i % len(patterns)])
+
+    fig, axes = plt.subplots(1, len(abls), figsize=(8 * len(abls), 7), sharey=True, squeeze=False)
+    for ax, abl in zip(axes[0], abls):
+        for view in views:
+            linestyle, marker = appearances[view.name]
+            for ild in absilds:
+                y = np.full(len(names), np.nan)
+                err = np.full(len(names), np.nan)
+                for j, name in enumerate(names):
+                    table = summaries[view.name, name]
+                    row = table[table["ABL"].eq(abl) & table["abs_ILD"].eq(ild)]
+                    if not row.empty:
+                        y[j] = row["mean"].iloc[0]
+                        err[j] = row["sem"].iloc[0]
+                if not np.isfinite(y).any():
+                    continue
+                ax.errorbar(
+                    x, y, yerr=err, color=colors[ild], linestyle=linestyle,
+                    marker=marker, markerfacecolor=colors[ild] if linestyle == "-" else "white",
+                    linewidth=2, capsize=3,
+                    label=f"{labels.get(view.name, view.name)} |ILD| {ild:g}",
+                )
+        ax.set_title(f"ABL {abl:g} dB", fontsize=style.title_fs, pad=style.title_pad)
+        ax.set_xticks(x)
+        ax.set_xticklabels([pretty.get(name, name) for name in names], rotation=30, ha="right")
+        ax.set_ylim(0.4, 1)
+        ax.set_yticks([0.5, 0.75, 1.0])
+        ax.set_xlabel("Stimulus duration", fontsize=style.label_fs)
+        style_axes(ax, style, square=False)
+    axes[0, 0].set_ylabel("P(correct)", fontsize=style.label_fs)
+    handles = [Line2D([], [], color=colors[ild], linewidth=2, label=f"|ILD| {ild:g} dB") for ild in absilds]
+    handles += [
+        Line2D([], [], color="black", linestyle=appearances[v.name][0],
+               marker=appearances[v.name][1],
+               markerfacecolor="black" if appearances[v.name][0] == "-" else "white",
+               label=labels.get(v.name, v.name))
+        for v in views
+    ]
+    fig.legend(handles=handles, loc="upper center", ncol=len(handles), fontsize=style.legend_fs, frameon=False)
+    fig.tight_layout(rect=[0, 0, 1, 0.88])
+    return fig
+
+
+def plot_perf_absild_by_view_and_abl(
+    prepared, views, stimdur_specs, abls, style,
+    stimdur_pretty=None, stimdur_colors=None, view_pretty=None,
+    absilds=(1, 2, 4, 8, 16),
+) -> plt.Figure:
+    """Performance versus absolute ILD, coloured by stimulus duration."""
+    pretty = stimdur_pretty or {}
+    colors = stimdur_colors or {}
+    labels = view_pretty or {}
+    names = [spec.name for spec in stimdur_specs]
+    abls = [int(abl) for abl in abls]
+    absilds = [float(value) for value in absilds]
+
+    fig, axes = plt.subplots(
+        1, len(abls), figsize=(6.5 * len(abls), 5.5),
+        sharex=True, sharey=True, squeeze=False,
+    )
+
+    view_styles = {}
+    for view in views:
+        view_lower = view.name.lower()
+        view_styles[view.name] = "--" if "hom" in view_lower else "-"
+
+    for col, abl in enumerate(abls):
+        ax = axes[0, col]
+        for view in views:
+            linestyle = view_styles[view.name]
+            for name in names:
+                summary = _get_or_build_absild_summary(prepared[view.name][name])
+                summary = summary[summary["ABL"].astype(int).eq(abl)]
+                summary = summary[summary["abs_ILD"].isin(absilds)]
+                if summary.empty:
+                    continue
+                color = colors.get(name, f"C{names.index(name) % 10}")
+                ax.errorbar(
+                    summary["abs_ILD"], summary["mean"], yerr=summary["sem"],
+                    color=color, marker="o", linestyle=linestyle,
+                    markerfacecolor="white" if linestyle == "--" else color,
+                    markeredgecolor=color, linewidth=2, capsize=3,
+                )
+
+        ax.set_title(f"ABL {abl:g} dB", fontsize=style.title_fs)
+        ax.set_xlim(min(absilds) - 0.5, max(absilds) + 0.5)
+        ax.set_xticks(absilds)
+        ax.set_ylim(0.4, 1)
+        ax.set_yticks([0.5, 0.75, 1.0])
+        ax.set_xlabel("|ILD| (dB)", fontsize=style.label_fs)
+        if col == 0:
+            ax.set_ylabel("P(correct)", fontsize=style.label_fs)
+        style_axes(ax, style, square=False)
+
+    from matplotlib.lines import Line2D
+    duration_handles = [
+        Line2D([], [], color=colors.get(name, f"C{i % 10}"), marker="o",
+               linewidth=2, label=pretty.get(name, name))
+        for i, name in enumerate(names)
+    ]
+    genotype_handles = [
+        Line2D([], [], color="black", marker="o", linestyle="-", label="WT"),
+        Line2D([], [], color="black", marker="o", linestyle="--",
+               markerfacecolor="white", label="HOM"),
+    ]
+    legend_duration = fig.legend(
+        handles=duration_handles, title="Stimulus duration",
+        loc="upper left", bbox_to_anchor=(1.01, 0.98),
+        fontsize=style.legend_fs, title_fontsize=style.legend_fs,
+        frameon=False,
+    )
+    fig.add_artist(legend_duration)
+    fig.legend(
+        handles=genotype_handles, title="Genotype",
+        loc="upper left", bbox_to_anchor=(1.01, 0.48),
+        fontsize=style.legend_fs, title_fontsize=style.legend_fs,
+        frameon=False,
+    )
+    fig.tight_layout(rect=[0, 0, 0.82, 1])
+    return fig
+
+
+def plot_perf_absild_combined_durations(
+    prepared, views, stimdur_specs, abls, style,
+    stimdur_pretty=None, stimdur_colors=None, view_pretty=None,
+    absilds=(1, 2, 4, 8, 16),
+) -> plt.Figure:
+    """Absolute-ILD performance after averaging duration pairs 8+16 and 32+64."""
+    duration_groups = {
+        "RT": ("0",),
+        "8 + 16 ms": ("8", "16"),
+        "32 + 64 ms": ("32", "64"),
+    }
+    pretty = stimdur_pretty or {}
+    colors = stimdur_colors or {}
+    labels = view_pretty or {}
+    names = {spec.name for spec in stimdur_specs}
+    abls = [int(abl) for abl in abls]
+    absilds = [float(value) for value in absilds]
+
+    fig, axes = plt.subplots(
+        1, len(abls), figsize=(6.5 * len(abls), 5.5),
+        sharex=True, sharey=True, squeeze=False,
+    )
+    view_styles = {
+        view.name: ("--" if "hom" in view.name.lower() else "-")
+        for view in views
+    }
+
+    for col, abl in enumerate(abls):
+        ax = axes[0, col]
+        for view in views:
+            linestyle = view_styles[view.name]
+            for group_name, duration_names in duration_groups.items():
+                summaries = []
+                for duration_name in duration_names:
+                    if duration_name not in names:
+                        continue
+                    summary = _get_or_build_absild_summary(
+                        prepared[view.name][duration_name]
+                    )
+                    summary = summary[
+                        summary["ABL"].astype(int).eq(abl)
+                        & summary["abs_ILD"].isin(absilds)
+                    ].copy()
+                    if not summary.empty:
+                        summaries.append(summary[["abs_ILD", "mean", "sem"]])
+                if not summaries:
+                    continue
+                combined = pd.concat(summaries, ignore_index=True)
+                combined = (
+                    combined.groupby("abs_ILD", as_index=False)
+                    .agg(mean=("mean", "mean"), sem=("sem", "mean"))
+                )
+                color = colors.get(
+                    duration_names[0], f"C{list(duration_groups).index(group_name)}"
+                )
+                ax.errorbar(
+                    combined["abs_ILD"], combined["mean"], yerr=combined["sem"],
+                    color=color, marker="o", linestyle=linestyle,
+                    markerfacecolor="white" if linestyle == "--" else color,
+                    markeredgecolor=color, linewidth=2, capsize=3,
+                )
+
+        ax.set_title(f"ABL {abl:g} dB", fontsize=style.title_fs)
+        ax.set_xlim(min(absilds) - 0.5, max(absilds) + 0.5)
+        ax.set_xticks(absilds)
+        ax.set_ylim(0.4, 1)
+        ax.set_yticks([0.5, 0.75, 1.0])
+        ax.set_xlabel("|ILD| (dB)", fontsize=style.label_fs)
+        if col == 0:
+            ax.set_ylabel("P(correct)", fontsize=style.label_fs)
+        style_axes(ax, style, square=False)
+
+    from matplotlib.lines import Line2D
+    duration_handles = [
+        Line2D([], [], color=colors.get(group[0], f"C{i}"), marker="o",
+               linewidth=2, label=label)
+        for i, (label, group) in enumerate(duration_groups.items())
+    ]
+    genotype_handles = [
+        Line2D([], [], color="black", marker="o", linestyle="-", label="WT"),
+        Line2D([], [], color="black", marker="o", linestyle="--",
+               markerfacecolor="white", label="HOM"),
+    ]
+    legend_duration = fig.legend(
+        handles=duration_handles, title="Combined duration",
+        loc="upper left", bbox_to_anchor=(1.01, 0.98),
+        fontsize=style.legend_fs, title_fontsize=style.legend_fs, frameon=False,
+    )
+    fig.add_artist(legend_duration)
+    fig.legend(
+        handles=genotype_handles, title="Genotype",
+        loc="upper left", bbox_to_anchor=(1.01, 0.48),
+        fontsize=style.legend_fs, title_fontsize=style.legend_fs, frameon=False,
+    )
+    fig.tight_layout(rect=[0, 0, 0.82, 1])
     return fig

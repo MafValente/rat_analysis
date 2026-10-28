@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from itertools import product
 from pathlib import Path
 from typing import Any
 import pickle
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from analysis.datasets import dataset_key, load_dataset_selections
@@ -22,6 +24,7 @@ from GroupComparison.layouts import (
     plot_abls_4x3,
     plot_chronometrics,
     plot_chronometric_psychometrics,
+    plot_chronometric_jnds,
 )
 from GroupComparison.plots import (
     plot_jnd_comparison_per_view,
@@ -384,9 +387,11 @@ def build_view_style_maps(
     fallback_colors = [f"C{i}" for i in range(10)]
     view_colors: dict[str, str] = {}
     view_styles: dict[str, dict] = {}
+    view_lines: dict[str, list[str]] = {}
 
     for fallback_i, view in enumerate(views):
         sub = view.selector(df)
+        view_lines[view.name] = sorted(sub["line"].dropna().astype(str).unique()) if "line" in sub else []
         genotypes = sorted(sub["genotype"].dropna().astype(str).unique()) if "genotype" in sub else []
         view_cohorts = sorted(sub["cohort"].dropna().astype(str).unique()) if "cohort" in sub else []
 
@@ -399,6 +404,24 @@ def build_view_style_maps(
             view_styles[view.name] = cohort_styles.get(view_cohorts[0], COHORT_STYLE_TEMPLATES[0]).copy()
         else:
             view_styles[view.name] = COHORT_STYLE_TEMPLATES[0].copy()
+
+    # Colour identifies genotype; line and marker identify strain when multiple
+    # strains are compared, including views that pool all of their cohorts.
+    selected_lines = sorted({line for lines in view_lines.values() for line in lines})
+    if len(selected_lines) > 1:
+        strain_templates = [
+            {"linestyle": "-", "marker": "o", "markerfacecolor": None},
+            {"linestyle": "--", "marker": "s", "markerfacecolor": "white"},
+            {"linestyle": ":", "marker": "^", "markerfacecolor": None},
+            {"linestyle": "-.", "marker": "D", "markerfacecolor": "white"},
+        ]
+        strain_styles = {
+            line: strain_templates[i % len(strain_templates)]
+            for i, line in enumerate(selected_lines)
+        }
+        for name, lines in view_lines.items():
+            if len(lines) == 1:
+                view_styles[name] = strain_styles[lines[0]].copy()
 
     return view_colors, view_styles
 
@@ -488,11 +511,14 @@ def prepare_flexible_groupcomparison(
     view_colors = view_colors or auto_view_colors
     view_styles = view_styles or auto_view_styles
 
+    print(f"Preparing and filtering {len(df):,} trials...", flush=True)
     df_filtered = apply_filters(df, fcfg)
-    prepared = build_prepared(df_filtered, views, cfg)
+    print(f"Retained {len(df_filtered):,} trials; preparing groups...", flush=True)
+    prepared = build_prepared(df_filtered, views, cfg, progress=True)
     jnd_indiv_by_view = compute_jnd_individuals_by_view(prepared, skip_abl=50)
     group_jnd_by_view = compute_group_jnd_by_view(jnd_indiv_by_view)
 
+    print("Preparation complete.", flush=True)
     return {
         "df_filtered": df_filtered,
         "prepared": prepared,
@@ -508,6 +534,42 @@ def prepare_flexible_groupcomparison(
     }
 
 
+def refresh_prepared_jnds(bundle: dict[str, Any]) -> None:
+    """Refresh lapse-normalized JNDs from stored animal fits, without refitting."""
+    refreshed = {}
+    for name, tables in bundle["prepared"].items():
+        params = tables.get("psy_params")
+        required = {"animal", "ABL", "slope_a", "bias_b", "lower_c", "upper_d"}
+        if params is None or not required.issubset(params.columns):
+            raise ValueError(
+                f"Stored fit parameters are missing for {name!r}. "
+                "Rerun the prepare once cell to update JNDs."
+            )
+        # Empty tables and restored notebook data may have object/string dtypes.
+        # Coerce a local copy so invalid fits are excluded without altering inputs.
+        params = params.copy()
+        numeric_columns = ["ABL", "slope_a", "bias_b", "lower_c", "upper_d"]
+        for column in numeric_columns:
+            params[column] = pd.to_numeric(params[column], errors="coerce").astype(float)
+        valid = (
+            np.isfinite(params[numeric_columns]).all(axis=1)
+            & params["slope_a"].ne(0)
+            & params["upper_d"].clip(0, 1).gt(params["lower_c"].clip(0, 1))
+            & params["ABL"].ne(50)
+        )
+        fits = params.loc[valid]
+        jnds = fits[["animal", "ABL"]].rename(columns={"animal": "subject"}).copy()
+        # Quarter/three-quarter thresholds within [c, d] for the fitted
+        # logistic c + (d-c)/(1 + exp(-2*a*(x-b))).
+        jnds["JND"] = np.log(3) / (2 * fits["slope_a"].abs())
+        refreshed[name] = jnds.reset_index(drop=True)
+    for name, jnds in refreshed.items():
+        bundle["prepared"][name]["jnd_indiv"] = jnds
+    bundle["jnd_indiv_by_view"] = refreshed
+    bundle["group_jnd_by_view"] = compute_group_jnd_by_view(refreshed)
+    bundle["jnd_definition"] = "lapse_normalized_quartiles"
+
+
 def plot_flexible_groupcomparison(
     *,
     bundle: dict[str, Any],
@@ -516,6 +578,7 @@ def plot_flexible_groupcomparison(
     cfg: GroupComparisonConfig | None = None,
     show: bool = True,
 ) -> dict[str, Any]:
+    refresh_prepared_jnds(bundle)
     prepared = bundle["prepared"]
     group_jnd_by_view = bundle["group_jnd_by_view"]
     jnd_indiv_by_view = bundle["jnd_indiv_by_view"]
@@ -554,6 +617,24 @@ def plot_flexible_groupcomparison(
         )
         fig_jnd.tight_layout()
         figs["jnd_comparison"] = fig_jnd
+
+        figs["main_clean"] = plot_views_3x3(
+            prepared=prepared, views=views, cfg=replace(cfg, error_mode="sem"),
+            style=style, overlay=OverlaySpec(),
+            group_jnd_by_view=group_jnd_by_view, view_colors=view_colors,
+            add_jnd_inset=False, rt_shaded_sem=True,
+        )
+        fig_jnd_clean, clean_axes = plt.subplots(
+            1, len(view_names), figsize=(4.2 * len(view_names), 4.0), squeeze=False,
+        )
+        plot_jnd_comparison_per_view(
+            fig=fig_jnd_clean, axes=list(clean_axes[0]), view_names=view_names,
+            jnd_indiv_by_view=jnd_indiv_by_view,
+            jnd_overlay=JNDOverlaySpec(abl_color_map=jnd_overlay.abl_color_map),
+            style=style, summary_only=True,
+        )
+        fig_jnd_clean.tight_layout()
+        figs["jnd_comparison_clean"] = fig_jnd_clean
     elif layout == "abls_4x3":
         from GroupComparison.layouts import plot_abls_4x3
 
@@ -617,6 +698,15 @@ def plot_flexible_groupcomparison(
         )
         figs = {"summary_aborts": fig_main}
     elif layout in {"chronometrics", "chronometrics_pooled"}:
+        if any(prepared[v.name]["rt_group"].empty for v in views):
+            print("Prepared data for selected groups (empty groups cannot produce curves):")
+            for view in views:
+                tables = prepared[view.name]
+                rows = tables.get("df_view", pd.DataFrame())
+                print(f"  {view.name}: {len(rows):,} filtered trials; "
+                      f"{len(tables['rt_group'])} RT points; "
+                      f"{len(tables['psy_group'])} psychometric points")
+            print("Preparation filters:", bundle.get("fcfg"))
         separate_abls = layout == "chronometrics"
         fig_main = plot_chronometrics(
             prepared=prepared,
@@ -636,7 +726,17 @@ def plot_flexible_groupcomparison(
             separate_abls=separate_abls,
             view_styles=view_styles,
         )
-        figs = {layout: fig_main, f"{layout}_psychometrics": fig_psychometrics}
+        fig_jnds = plot_chronometric_jnds(
+            group_jnd_by_view=group_jnd_by_view,
+            views=views,
+            view_colors=view_colors,
+            view_styles=view_styles,
+        )
+        figs = {
+            layout: fig_main,
+            f"{layout}_psychometrics": fig_psychometrics,
+            f"{layout}_jnds": fig_jnds,
+        }
     else:
         raise ValueError(
             f"Unknown layout='{layout}'. Use 'views_3x3', 'abls_4x3', 'animals_plus_mean', 'psy_params', 'summary_metrics', 'summary_aborts', 'chronometrics', or 'chronometrics_pooled'."

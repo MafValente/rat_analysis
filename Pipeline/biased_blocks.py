@@ -8,14 +8,16 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib import colors as mcolors
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from scipy.optimize import curve_fit, minimize
 
 import Helpers.DataHelpers as DataHelpers
 from analysis import psychometric as Psychometric
 from GroupComparison.config import FilterConfig, GroupComparisonConfig, OverlaySpec, PlotStyle, ViewSpec
 from GroupComparison.layouts import plot_abls_4x3
-from GroupComparison.plots import apply_50_tick_labels, plot_mt_on_ax, plot_psy_on_ax, plot_rt_on_ax, style_axes
+from GroupComparison.plots import _maybe_shift, apply_50_tick_labels, plot_mt_on_ax, plot_psy_on_ax, plot_rt_on_ax, style_axes
 from GroupComparison.prepare import (
     apply_filters,
     compute_group_jnd_by_view,
@@ -62,7 +64,7 @@ def default_config() -> GroupComparisonConfig:
 
 def default_filter_config() -> FilterConfig:
     return FilterConfig(
-        training_min=16,
+        training_min=None,
         session_min=0,
         drop_repeat_trials=True,
         session_type_values=None,
@@ -595,6 +597,7 @@ def prepare_biased_blocks(
         "short_duration_value": short_duration_value,
         "psychometric_l2": float(psychometric_l2),
         "max_unbiased_imbalance": float(max_unbiased_imbalance),
+        "rightward_ild_sign": int(rightward_ild_sign),
     }
 
 
@@ -717,6 +720,114 @@ def _replace_figure_legend_at_bottom(
     )
 
 
+def _apply_sparse_ild_ticks_to_figures(obj: Any) -> None:
+    """Use sparse labels only on ILD x-axes; leave trial/duration axes untouched."""
+    if isinstance(obj, dict):
+        if "figure" in obj:
+            fig = obj["figure"]
+            if fig is not None:
+                for ax in fig.axes:
+                    xlabel = ax.get_xlabel().strip().lower()
+                    if "ild" not in xlabel:
+                        continue
+                    ax.set_xticks([-18, -8, -4, 0, 4, 8, 18])
+                    ax.set_xticklabels(["-50", "-8", "-4", "0", "4", "8", "50"])
+        for key, value in obj.items():
+            if key != "figure":
+                _apply_sparse_ild_ticks_to_figures(value)
+
+
+def _apply_font_size_to_figures(obj: Any, font_size: int = 16) -> None:
+    """Normalize all text in generated figures after layout-specific plotting."""
+    if isinstance(obj, dict):
+        if "figure" in obj:
+            fig = obj["figure"]
+            if fig is not None:
+                for text in fig.findobj(match=plt.Text):
+                    text.set_fontsize(font_size)
+                for ax in fig.axes:
+                    ylabel = ax.get_ylabel().strip().lower()
+                    if hasattr(ax, "set_box_aspect"):
+                        if "p(right)" in ylabel:
+                            ax.set_box_aspect(1)
+                        else:
+                            ax.set_box_aspect(None)
+                    ax.tick_params(axis="both", labelsize=font_size)
+                for legend in fig.legends:
+                    for text in legend.get_texts():
+                        text.set_fontsize(font_size)
+        for key, value in obj.items():
+            if key != "figure":
+                _apply_font_size_to_figures(value, font_size=font_size)
+
+
+def _axis_visible_data_y(ax: plt.Axes) -> np.ndarray:
+    values: list[np.ndarray] = []
+
+    for line in ax.lines:
+        if line.get_transform() != ax.transData:
+            continue
+        y = np.asarray(line.get_ydata(orig=False), dtype=float)
+        y = y[np.isfinite(y)]
+        if len(y):
+            values.append(y)
+
+    for collection in ax.collections:
+        try:
+            offsets = np.asarray(collection.get_offsets(), dtype=float)
+        except Exception:
+            offsets = np.empty((0, 2))
+        if offsets.ndim == 2 and offsets.shape[1] >= 2 and len(offsets):
+            y = offsets[:, 1]
+            y = y[np.isfinite(y)]
+            if len(y):
+                values.append(y)
+
+        try:
+            segments = collection.get_segments()
+        except Exception:
+            segments = []
+        for segment in segments:
+            segment = np.asarray(segment, dtype=float)
+            if segment.ndim == 2 and segment.shape[1] >= 2:
+                y = segment[:, 1]
+                y = y[np.isfinite(y)]
+                if len(y):
+                    values.append(y)
+
+    if not values:
+        return np.asarray([], dtype=float)
+    return np.concatenate(values)
+
+
+def _apply_data_y_limits_to_figures(obj: Any, pad_frac: float = 0.12, min_pad: float = 0.03) -> None:
+    """Autoscale each panel to its visible plotted y-data and errorbars."""
+    if isinstance(obj, dict):
+        if "figure" in obj:
+            fig = obj["figure"]
+            if fig is not None:
+                for ax in fig.axes:
+                    ylabel = ax.get_ylabel().strip().lower()
+                    if "p(right)" in ylabel:
+                        ax.set_ylim(0, 1)
+                        continue
+                    y = _axis_visible_data_y(ax)
+                    if not len(y):
+                        continue
+                    y_min = float(np.nanmin(y))
+                    y_max = float(np.nanmax(y))
+                    if not np.isfinite(y_min) or not np.isfinite(y_max):
+                        continue
+                    if y_min == y_max:
+                        pad = max(abs(y_min) * pad_frac, min_pad)
+                    else:
+                        pad = max((y_max - y_min) * pad_frac, min_pad)
+                    ax.set_ylim(y_min - pad, y_max + pad)
+        for key, value in obj.items():
+            if key != "figure":
+                _apply_data_y_limits_to_figures(value, pad_frac=pad_frac, min_pad=min_pad)
+
+
 def _safe_name(value: str) -> str:
     return str(value).replace("/", "_").replace(":", "_").replace(" ", "_")
 
@@ -759,6 +870,187 @@ def _plot_prepared_abls(
 
 MEAN_ABL_SYNTHETIC = 999
 MEAN_ABL_TARGETS = (20, 40, 60)
+ABL_SHADE_TO_WHITE = {20: 0.55, 40: 0.30, 60: 0.05}
+
+
+def _blend_with_white(color: str, amount: float) -> tuple[float, float, float]:
+    rgb = np.asarray(mcolors.to_rgb(color), dtype=float)
+    return tuple(rgb * (1.0 - amount) + amount)
+
+
+def _block_abl_color(block_name: str, abl: int) -> tuple[float, float, float]:
+    return _blend_with_white(BLOCK_COLORS.get(block_name, "gray"), ABL_SHADE_TO_WHITE.get(int(abl), 0.25))
+
+
+def _plot_group_metric_for_abl(
+    ax: plt.Axes,
+    group_df: pd.DataFrame,
+    *,
+    abl: int,
+    color,
+    cfg: GroupComparisonConfig,
+    marker: str,
+    linestyle: str = "-",
+) -> None:
+    sub = group_df[pd.to_numeric(group_df.get("ABL"), errors="coerce") == int(abl)].sort_values("ILD")
+    if sub.empty:
+        return
+    x = _maybe_shift(sub["ILD"], cfg)
+    ax.errorbar(
+        x,
+        sub["mean"],
+        yerr=sub["sem"] if "sem" in sub.columns else None,
+        fmt=marker,
+        color=color,
+        markerfacecolor=color,
+        markeredgecolor=color,
+        markersize=6.5,
+        linewidth=0,
+        elinewidth=1.2,
+        capsize=2.5,
+        alpha=0.95,
+    )
+    ax.plot(x, sub["mean"], color=color, linewidth=2.2, linestyle=linestyle, alpha=0.95)
+
+
+def _plot_psy_group_for_abl(
+    ax: plt.Axes,
+    tables: dict[str, Any],
+    *,
+    abl: int,
+    color,
+    cfg: GroupComparisonConfig,
+    marker: str,
+    linestyle: str = "-",
+) -> None:
+    psy_group = tables.get("psy_group", pd.DataFrame())
+    sub = psy_group[pd.to_numeric(psy_group.get("ABL"), errors="coerce") == int(abl)].sort_values("ILD")
+    if not sub.empty:
+        x = _maybe_shift(sub["ILD"], cfg)
+        ax.errorbar(
+            x,
+            sub["mean"],
+            yerr=sub["sem"] if "sem" in sub.columns else None,
+            fmt=marker,
+            color=color,
+            markerfacecolor=color,
+            markeredgecolor=color,
+            markersize=6.5,
+            linewidth=0,
+            elinewidth=1.2,
+            capsize=2.5,
+            alpha=0.95,
+        )
+
+    mean_fit = tables.get("psy_mean_fits", {}).get(int(abl))
+    if mean_fit:
+        ax.plot(_maybe_shift(mean_fit["xx"], cfg), mean_fit["yy"], color=color, linewidth=2.5, linestyle=linestyle)
+
+
+def _plot_genotype_abl_summary(
+    *,
+    prepared_by_view: dict[str, dict[str, dict[str, Any]]],
+    views: list[ViewSpec],
+    cfg: GroupComparisonConfig,
+    style: PlotStyle,
+    include_abls: tuple[int, ...] = MEAN_ABL_TARGETS,
+) -> plt.Figure | None:
+    view_names = [v.name for v in views if v.name in prepared_by_view]
+    if not view_names:
+        return None
+
+    fig, axes = plt.subplots(len(view_names), 3, figsize=(18, 4.8 * len(view_names)), squeeze=False, sharex="col")
+    abl_markers = {20: "o", 40: "s", 60: "^"}
+
+    for r, view_name in enumerate(view_names):
+        ax_rt, ax_mt, ax_psy = axes[r]
+        prepared = prepared_by_view[view_name]
+        block_names = [name for name in BLOCK_ORDER if name in prepared]
+        if not block_names:
+            continue
+
+        ax_psy.axvline(0, color="gray", linestyle="--", alpha=0.7)
+        ax_psy.axhline(0.5, color="gray", linestyle="--", alpha=0.7)
+        ax_psy.set_ylim(0, 1)
+
+        for block_name in block_names:
+            tables = prepared[block_name]
+            linestyle = BLOCK_STYLES.get(block_name, {}).get("linestyle", "-")
+            for abl in include_abls:
+                color = _block_abl_color(block_name, int(abl))
+                marker = abl_markers.get(int(abl), "o")
+                _plot_group_metric_for_abl(
+                    ax_rt,
+                    tables.get("rt_group", pd.DataFrame()),
+                    abl=int(abl),
+                    color=color,
+                    cfg=cfg,
+                    marker=marker,
+                    linestyle=linestyle,
+                )
+                _plot_group_metric_for_abl(
+                    ax_mt,
+                    tables.get("mt_group", pd.DataFrame()),
+                    abl=int(abl),
+                    color=color,
+                    cfg=cfg,
+                    marker=marker,
+                    linestyle=linestyle,
+                )
+                _plot_psy_group_for_abl(
+                    ax_psy,
+                    tables,
+                    abl=int(abl),
+                    color=color,
+                    cfg=cfg,
+                    marker=marker,
+                    linestyle=linestyle,
+                )
+
+        style_axes(ax_rt, style, f"{view_name} - RT", "ILD (dB)", "Mean RT (s)")
+        style_axes(ax_mt, style, f"{view_name} - MT", "ILD (dB)", "Mean MT (s)")
+        style_axes(ax_psy, style, f"{view_name} - Psychometric", "ILD (dB)", "P(Right)")
+
+        ax_rt.set_xlim(*cfg.xlim_sym)
+        ax_rt.set_ylim(*cfg.ylim_rt)
+        ax_mt.set_xlim(*cfg.xlim_sym)
+        ax_mt.set_ylim(*cfg.ylim_mt)
+        ax_psy.set_xlim(*cfg.xlim_sym)
+        _set_signed_ild_ticks(ax_rt, cfg)
+        apply_50_tick_labels(ax_mt, cfg.xlim_sym)
+        apply_50_tick_labels(ax_psy, cfg.xlim_sym)
+
+    handles = []
+    labels = []
+    for block_name in BLOCK_ORDER:
+        if not any(block_name in prepared_by_view[vn] for vn in view_names):
+            continue
+        for abl in include_abls:
+            labels.append(f"{block_name} ABL {abl}")
+            handles.append(
+                Line2D(
+                    [],
+                    [],
+                    color=_block_abl_color(block_name, int(abl)),
+                    marker=abl_markers.get(int(abl), "o"),
+                    linestyle=BLOCK_STYLES.get(block_name, {}).get("linestyle", "-"),
+                    markerfacecolor=_block_abl_color(block_name, int(abl)),
+                    markeredgecolor=_block_abl_color(block_name, int(abl)),
+                )
+            )
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.012),
+        bbox_transform=fig.transFigure,
+        ncol=min(6, max(1, len(labels))),
+        fontsize=style.legend_fs,
+        frameon=False,
+    )
+    fig.suptitle("Biased blocks - ABL 20, 40, 60 group traces", fontsize=26, y=0.995)
+    fig.tight_layout(rect=[0, 0.08, 1, 0.95])
+    return fig
 
 
 def _fit_mean_psy_curve(
@@ -907,7 +1199,7 @@ def _plot_genotype_mean_abl_summary(
 
         style_axes(ax_rt, style, f"{view_name} - RT", "ILD (dB)", "Mean RT (s)")
         style_axes(ax_mt, style, f"{view_name} - MT", "ILD (dB)", "Mean MT (s)")
-        style_axes(ax_psy, style, f"{view_name} - Psychometric", "ILD (dB)", "P(Left)")
+        style_axes(ax_psy, style, f"{view_name} - Psychometric", "ILD (dB)", "P(Right)")
 
         ax_rt.set_xlim(*cfg.xlim_sym)
         ax_rt.set_ylim(*cfg.ylim_rt)
@@ -943,22 +1235,14 @@ def plot_genotype_block_figures(
     views = views or bundle["views"]
 
     outputs = {}
-    collapsed_prepared_by_view: dict[str, dict[str, dict[str, Any]]] = {}
+    prepared_by_view: dict[str, dict[str, dict[str, Any]]] = {}
     for view in views:
         df_view = view.selector(df_blocks)
         if df_view.empty:
             continue
         block_views = make_block_views(df_view)
         prepared = build_prepared_signed_rt(df_view, block_views, cfg, psychometric_l2=psychometric_l2)
-        collapsed_prepared = {
-            block_view.name: _collapse_tables_over_abls(
-                prepared.get(block_view.name, {}),
-                include_abls=MEAN_ABL_TARGETS,
-                psychometric_l2=psychometric_l2,
-            )
-            for block_view in block_views
-        }
-        collapsed_prepared_by_view[view.name] = collapsed_prepared
+        prepared_by_view[view.name] = prepared
         jnd_indiv = compute_jnd_individuals_by_view(prepared, skip_abl=50)
         group_jnd = compute_group_jnd_by_view(jnd_indiv)
         block_names = [v.name for v in block_views]
@@ -981,6 +1265,17 @@ def plot_genotype_block_figures(
         }
         if show:
             plt.show()
+    collapsed_prepared_by_view = {
+        view_name: {
+            block_name: _collapse_tables_over_abls(
+                tables,
+                include_abls=MEAN_ABL_TARGETS,
+                psychometric_l2=psychometric_l2,
+            )
+            for block_name, tables in prepared.items()
+        }
+        for view_name, prepared in prepared_by_view.items()
+    }
     mean_abl_figure = _plot_genotype_mean_abl_summary(
         collapsed_prepared_by_view=collapsed_prepared_by_view,
         views=views,
@@ -995,6 +1290,187 @@ def plot_genotype_block_figures(
         }
         if show:
             plt.show()
+
+    abl_summary_figure = _plot_genotype_abl_summary(
+        prepared_by_view=prepared_by_view,
+        views=views,
+        cfg=cfg,
+        style=style,
+    )
+    if abl_summary_figure is not None:
+        outputs["abl_summary"] = {
+            "figure": abl_summary_figure,
+            "prepared": prepared_by_view,
+            "abls": MEAN_ABL_TARGETS,
+        }
+        if show:
+            plt.show()
+    return outputs
+
+
+def _duration_column(df: pd.DataFrame) -> str:
+    if "short_duration" in df.columns:
+        return "short_duration"
+    if "stim_dur" in df.columns:
+        return "stim_dur"
+    raise KeyError("Need 'short_duration' or 'stim_dur' to build the duration-row layout.")
+
+
+def _duration_sort_key(value: Any) -> tuple[float, str]:
+    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.notna(numeric):
+        if float(numeric) == 0:
+            return (float("inf"), str(value))
+        return (float(numeric), str(value))
+    if str(value).strip().lower() == "rt":
+        return (float("inf"), str(value))
+    return (float("inf") - 1, str(value))
+
+
+def plot_genotype_duration_row_figures(
+    bundle: dict[str, Any],
+    *,
+    views: list[ViewSpec] | None = None,
+    show: bool = True,
+) -> dict[str, Any]:
+    df_blocks = bundle["df_blocks"]
+    cfg = bundle["cfg"]
+    style = bundle["style"]
+    psychometric_l2 = float(bundle.get("psychometric_l2", PSYCHOMETRIC_L2))
+    views = views or bundle["views"]
+    duration_col = _duration_column(df_blocks)
+    duration_values = sorted(
+        pd.Series(df_blocks[duration_col]).dropna().unique(),
+        key=_duration_sort_key,
+    )
+    if not duration_values:
+        return {}
+
+    outputs: dict[str, Any] = {}
+    for view in views:
+        df_view_all = view.selector(df_blocks)
+        if df_view_all.empty:
+            continue
+
+        fig, axes = plt.subplots(
+            len(duration_values),
+            3,
+            figsize=(18, max(4.2 * len(duration_values), 4.2)),
+            squeeze=False,
+            sharex="col",
+        )
+        prepared_by_duration: dict[str, dict[str, dict[str, Any]]] = {}
+
+        for row, duration in enumerate(duration_values):
+            ax_rt, ax_mt, ax_psy = axes[row]
+            duration_mask = pd.Series(df_view_all[duration_col]).eq(duration)
+            df_duration = df_view_all[duration_mask].copy()
+            duration_label = _format_stim_duration_title(duration)
+
+            ax_psy.axvline(0, color="gray", linestyle="--", alpha=0.7)
+            ax_psy.axhline(0.5, color="gray", linestyle="--", alpha=0.7)
+            ax_psy.set_ylim(0, 1)
+
+            if not df_duration.empty:
+                block_views = make_block_views(df_duration)
+                prepared = build_prepared_signed_rt(
+                    df_duration,
+                    block_views,
+                    cfg,
+                    psychometric_l2=psychometric_l2,
+                )
+                prepared_by_duration[str(duration)] = prepared
+
+                for block_name in [name for name in BLOCK_ORDER if name in prepared]:
+                    tables = prepared[block_name]
+                    style_cfg = BLOCK_STYLES.get(block_name, {})
+                    linestyle = style_cfg.get("linestyle", "-")
+                    for abl in MEAN_ABL_TARGETS:
+                        color = _block_abl_color(block_name, int(abl))
+                        marker = {20: "o", 40: "s", 60: "^"}.get(int(abl), "o")
+                        _plot_group_metric_for_abl(
+                            ax_rt,
+                            tables.get("rt_group", pd.DataFrame()),
+                            abl=int(abl),
+                            color=color,
+                            cfg=cfg,
+                            marker=marker,
+                            linestyle=linestyle,
+                        )
+                        _plot_group_metric_for_abl(
+                            ax_mt,
+                            tables.get("mt_group", pd.DataFrame()),
+                            abl=int(abl),
+                            color=color,
+                            cfg=cfg,
+                            marker=marker,
+                            linestyle=linestyle,
+                        )
+                        _plot_psy_group_for_abl(
+                            ax_psy,
+                            tables,
+                            abl=int(abl),
+                            color=color,
+                            cfg=cfg,
+                            marker=marker,
+                            linestyle=linestyle,
+                        )
+
+            style_axes(ax_rt, style, f"{duration_label} - RT", "ILD (dB)", "Mean RT (s)")
+            style_axes(ax_mt, style, f"{duration_label} - MT", "ILD (dB)", "Mean MT (s)")
+            style_axes(ax_psy, style, f"{duration_label} - Psychometric", "ILD (dB)", "P(Right)")
+            ax_rt.set_xlim(*cfg.xlim_sym)
+            ax_rt.set_ylim(*cfg.ylim_rt)
+            ax_mt.set_xlim(*cfg.xlim_sym)
+            ax_mt.set_ylim(*cfg.ylim_mt)
+            ax_psy.set_xlim(*cfg.xlim_sym)
+            _set_signed_ild_ticks(ax_rt, cfg)
+            apply_50_tick_labels(ax_mt, cfg.xlim_sym)
+            apply_50_tick_labels(ax_psy, cfg.xlim_sym)
+
+        legend_handles = []
+        legend_labels = []
+        abl_markers = {20: "o", 40: "s", 60: "^"}
+        for block_name in BLOCK_ORDER:
+            if not any(block_name in prepared for prepared in prepared_by_duration.values()):
+                continue
+            for abl in MEAN_ABL_TARGETS:
+                color = _block_abl_color(block_name, int(abl))
+                legend_labels.append(f"{block_name} ABL {abl}")
+                legend_handles.append(
+                    Line2D(
+                        [],
+                        [],
+                        color=color,
+                        marker=abl_markers.get(int(abl), "o"),
+                        linestyle=BLOCK_STYLES.get(block_name, {}).get("linestyle", "-"),
+                        markerfacecolor=color,
+                        markeredgecolor=color,
+                    )
+                )
+        fig.legend(
+            legend_handles,
+            legend_labels,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.012),
+            bbox_transform=fig.transFigure,
+            ncol=min(6, max(1, len(legend_labels))),
+            fontsize=style.legend_fs,
+            frameon=False,
+        )
+        fig.suptitle(f"{view.name} - biased blocks by stim duration", fontsize=26, y=0.995)
+        fig.tight_layout(rect=[0, 0.08, 1, 0.96])
+
+        outputs[view.name] = {
+            "figure": fig,
+            "prepared": prepared_by_duration,
+            "duration_col": duration_col,
+            "durations": duration_values,
+            "abls": MEAN_ABL_TARGETS,
+        }
+        if show:
+            plt.show()
+
     return outputs
 
 
@@ -1143,6 +1619,7 @@ def plot_block_condition_psy_params(
     bundle: dict[str, Any],
     *,
     views: list[ViewSpec] | None = None,
+    view_colors: dict[str, str] | None = None,
     block_conditions: list[str] | tuple[str, ...] = ("rightward", "leftward", "unbiased"),
     show: bool = True,
 ) -> dict[str, Any]:
@@ -1154,6 +1631,7 @@ def plot_block_condition_psy_params(
     """
     style = bundle["style"]
     views = views or bundle["views"]
+    view_colors = view_colors or {}
     view_names = [v.name for v in views]
     params = _collect_block_condition_params(
         bundle,
@@ -1289,7 +1767,226 @@ def plot_block_condition_psy_params(
             output_key="ABL_all",
         )
 
+    try:
+        duration_abl_outputs = plot_block_condition_psy_params_duration_abls(
+            bundle,
+            views=views,
+            view_colors=view_colors,
+            block_conditions=block_conditions,
+            show=show,
+        )
+    except (KeyError, ValueError):
+        duration_abl_outputs = {}
+    if duration_abl_outputs:
+        outputs["duration_abls"] = duration_abl_outputs
+
     return outputs
+
+
+def _collect_block_condition_params_by_duration(
+    bundle: dict[str, Any],
+    *,
+    views: list[ViewSpec],
+    block_conditions: list[str] | tuple[str, ...],
+) -> pd.DataFrame:
+    df_blocks = bundle["df_blocks"]
+    cfg = bundle["cfg"]
+    psychometric_l2 = float(bundle.get("psychometric_l2", PSYCHOMETRIC_L2))
+    duration_col = _duration_column(df_blocks)
+    duration_values = sorted(pd.Series(df_blocks[duration_col]).dropna().unique(), key=_duration_sort_key)
+    rows = []
+
+    for duration in duration_values:
+        df_duration = df_blocks[pd.Series(df_blocks[duration_col]).eq(duration)].copy()
+        if df_duration.empty:
+            continue
+        for condition in block_conditions:
+            df_condition = df_duration[df_duration["block_condition"].astype(str) == condition].copy()
+            if df_condition.empty:
+                continue
+            condition_views = [v for v in views if not v.selector(df_condition).empty]
+            if not condition_views:
+                continue
+            prepared = build_prepared_signed_rt(df_condition, condition_views, cfg, psychometric_l2=psychometric_l2)
+            for view in condition_views:
+                params = prepared.get(view.name, {}).get("psy_params", pd.DataFrame()).copy()
+                if params.empty:
+                    continue
+                params["view"] = view.name
+                params["block_condition"] = condition
+                params["duration"] = duration
+                params["duration_label"] = _format_stim_duration_title(duration)
+                rows.append(params)
+
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "animal", "line", "cohort", "genotype", "dataset_key", "ABL",
+                "slope_a", "bias_b", "lower_c", "upper_d", "view", "block_condition",
+                "duration", "duration_label",
+            ]
+        )
+    return pd.concat(rows, ignore_index=True, sort=False)
+
+
+def plot_block_condition_psy_params_duration_abls(
+    bundle: dict[str, Any],
+    *,
+    views: list[ViewSpec] | None = None,
+    view_colors: dict[str, str] | None = None,
+    block_conditions: list[str] | tuple[str, ...] = ("rightward", "leftward", "unbiased"),
+    show: bool = True,
+) -> dict[str, Any]:
+    """Plot rows=duration, columns=parameter, color=view, marker=ABL."""
+    style = bundle["style"]
+    views = views or bundle["views"]
+    view_colors = view_colors or {}
+    view_names = [v.name for v in views]
+    params = _collect_block_condition_params_by_duration(
+        bundle,
+        views=views,
+        block_conditions=block_conditions,
+    )
+    if params.empty:
+        raise ValueError("No psychometric parameter rows available for duration/ABL parameter layout.")
+
+    params = params.copy()
+    params["ABL"] = pd.to_numeric(params["ABL"], errors="coerce")
+    params = params[params["ABL"].isin(MEAN_ABL_TARGETS)].copy()
+    params["ABL"] = params["ABL"].astype(int)
+    if params.empty:
+        raise ValueError("No psychometric parameter rows available for ABL 20/40/60.")
+
+    duration_values = sorted(params["duration"].dropna().unique(), key=_duration_sort_key)
+    condition_names = [
+        condition for condition in block_conditions
+        if condition in set(params["block_condition"].dropna().astype(str))
+    ]
+    x_positions = {condition: i for i, condition in enumerate(condition_names)}
+    abl_markers = {20: "o", 40: "s", 60: "^"}
+    view_offsets = (
+        np.linspace(-0.32, 0.32, len(view_names))
+        if len(view_names) > 1
+        else np.array([0.0])
+    )
+    abl_offsets = {20: -0.085, 40: 0.0, 60: 0.085}
+    y_lims: dict[str, tuple[float, float] | None] = {}
+    for param_col, _ in PSY_PARAM_SPECS:
+        y_values = pd.to_numeric(params[param_col], errors="coerce").dropna()
+        if y_values.empty:
+            y_lims[param_col] = None
+            continue
+        y_min = float(y_values.min())
+        y_max = float(y_values.max())
+        pad = max((y_max - y_min) * 0.10, 0.05)
+        y_lims[param_col] = (y_min - pad, y_max + pad)
+
+    fig, axes = plt.subplots(
+        len(duration_values),
+        len(PSY_PARAM_SPECS),
+        figsize=(max(4.1 * len(PSY_PARAM_SPECS), 4.1), max(3.2 * len(duration_values), 3.2)),
+        squeeze=False,
+        sharex=True,
+    )
+
+    for row, duration in enumerate(duration_values):
+        duration_label = _format_stim_duration_title(duration)
+        for col, (param_col, param_title) in enumerate(PSY_PARAM_SPECS):
+            ax = axes[row, col]
+            panel = params[params["duration"].eq(duration)].copy()
+
+            for view_i, view_name in enumerate(view_names):
+                view_panel = panel[panel["view"].astype(str).eq(view_name)].copy()
+                if view_panel.empty:
+                    continue
+                color = view_colors.get(view_name, f"C{view_i}")
+                view_offset = float(view_offsets[view_i])
+                for abl in MEAN_ABL_TARGETS:
+                    for condition in condition_names:
+                        sub = view_panel[
+                            view_panel["block_condition"].astype(str).eq(condition)
+                            & view_panel["ABL"].eq(int(abl))
+                        ]
+                        values = pd.to_numeric(sub[param_col], errors="coerce").dropna()
+                        if values.empty:
+                            continue
+                        x = x_positions[condition] + view_offset + abl_offsets.get(int(abl), 0.0)
+                        ax.errorbar(
+                            x,
+                            float(values.mean()),
+                            yerr=sem(values.to_numpy()),
+                            fmt=abl_markers.get(int(abl), "o"),
+                            color=color,
+                            markerfacecolor=color,
+                            markeredgecolor=color,
+                            markersize=6.5,
+                            elinewidth=1.2,
+                            capsize=2.5,
+                            linestyle="None",
+                            zorder=4,
+                        )
+
+            if row == 0:
+                ax.set_title(param_title, fontsize=style.legend_fs, pad=style.title_pad)
+            if col == 0:
+                ax.set_ylabel(f"{duration_label}\nParameter value", fontsize=style.legend_fs)
+            ax.set_xticks(list(x_positions.values()))
+            ax.set_xticklabels(condition_names, rotation=25, ha="right", fontsize=style.legend_fs)
+            ax.tick_params(axis="both", labelsize=style.legend_fs)
+            ax.grid(True, axis="x", linestyle=":", alpha=0.25)
+            if y_lims.get(param_col) is not None:
+                ax.set_ylim(*y_lims[param_col])
+            for spine in ["right", "top"]:
+                ax.spines[spine].set_visible(False)
+
+    genotype_handles = [
+        Line2D(
+            [],
+            [],
+            color=view_colors.get(view_name, f"C{i}"),
+            marker="o",
+            linestyle="None",
+            markerfacecolor=view_colors.get(view_name, f"C{i}"),
+            markeredgecolor=view_colors.get(view_name, f"C{i}"),
+            label=view_name,
+        )
+        for i, view_name in enumerate(view_names)
+    ]
+    abl_handles = [
+        Line2D(
+            [],
+            [],
+            color="black",
+            marker=abl_markers.get(int(abl), "o"),
+            linestyle="None",
+            markerfacecolor="black",
+            markeredgecolor="black",
+            label=f"ABL {abl}",
+        )
+        for abl in MEAN_ABL_TARGETS
+    ]
+    fig.legend(
+        handles=genotype_handles + abl_handles,
+        labels=[h.get_label() for h in genotype_handles + abl_handles],
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.012),
+        ncol=min(6, len(genotype_handles) + len(abl_handles)),
+        fontsize=style.legend_fs,
+        frameon=False,
+    )
+    fig.suptitle("Psychometric parameters by block condition, duration, genotype, and ABL", fontsize=style.legend_fs, y=0.995)
+    fig.tight_layout(rect=[0, 0.08, 1, 0.96])
+    if show:
+        plt.show()
+
+    return {
+        "combined": {
+            "figure": fig,
+            "params": params,
+            "durations": duration_values,
+            "abls": MEAN_ABL_TARGETS,
+        }
+    }
 
 
 def _collect_block_condition_summary_metrics(
@@ -1389,6 +2086,157 @@ def _collect_block_condition_summary_metrics(
         .reset_index()
     )
     return collapsed
+
+
+def _collect_block_condition_summary_metrics_by_duration(
+    bundle: dict[str, Any],
+    *,
+    views: list[ViewSpec],
+    block_conditions: list[str] | tuple[str, ...],
+    include_abls: tuple[int, ...] = MEAN_ABL_TARGETS,
+) -> pd.DataFrame:
+    df_blocks = bundle["df_blocks"]
+    duration_col = _duration_column(df_blocks)
+    duration_values = sorted(pd.Series(df_blocks[duration_col]).dropna().unique(), key=_duration_sort_key)
+    rows = []
+    for duration in duration_values:
+        duration_bundle = {
+            **bundle,
+            "df_blocks": df_blocks[pd.Series(df_blocks[duration_col]).eq(duration)].copy(),
+        }
+        metrics = _collect_block_condition_summary_metrics(
+            duration_bundle,
+            views=views,
+            block_conditions=block_conditions,
+            include_abls=include_abls,
+        )
+        if metrics.empty:
+            continue
+        metrics["duration"] = duration
+        metrics["duration_label"] = _format_stim_duration_title(duration)
+        rows.append(metrics)
+    if not rows:
+        return pd.DataFrame(
+            columns=["animal", "view", "block_condition", "metric", "value", "n_abls", "duration", "duration_label"]
+        )
+    return pd.concat(rows, ignore_index=True, sort=False)
+
+
+def _plot_block_condition_summary_duration_rows(
+    *,
+    metrics: pd.DataFrame,
+    views: list[ViewSpec],
+    condition_names: list[str],
+    style: PlotStyle,
+    show: bool,
+) -> plt.Figure:
+    view_names = [v.name for v in views]
+    specs = [
+        ("bias_b", "Psychometric bias", "Bias (b)"),
+        ("prop_correct", "Proportion correct", "Proportion correct"),
+        ("JND", "JND", "JND"),
+    ]
+    duration_values = sorted(metrics["duration"].dropna().unique(), key=_duration_sort_key)
+    x_positions = {name: i for i, name in enumerate(view_names)}
+    offsets = np.linspace(-0.14, 0.14, len(condition_names)) if len(condition_names) > 1 else np.array([0.0])
+    fs = style.legend_fs
+    rng = np.random.default_rng(14)
+    fig, axes = plt.subplots(
+        len(duration_values),
+        len(specs),
+        figsize=(5.0 * len(specs), max(3.4 * len(duration_values), 3.4)),
+        squeeze=False,
+        sharex=True,
+    )
+
+    for row, duration in enumerate(duration_values):
+        duration_label = _format_stim_duration_title(duration)
+        duration_metrics = metrics[metrics["duration"].eq(duration)].copy()
+        for col, (metric, title, ylabel) in enumerate(specs):
+            ax = axes[row, col]
+            metric_df = duration_metrics[duration_metrics["metric"].astype(str) == metric].copy()
+            for cond_i, condition in enumerate(condition_names):
+                cond_df = metric_df[metric_df["block_condition"].astype(str) == condition].copy()
+                if cond_df.empty:
+                    continue
+                color = BLOCK_COLORS.get(condition, f"C{cond_i}")
+                marker = BLOCK_STYLES.get(condition, {}).get("marker", "o")
+                offset = float(offsets[cond_i])
+                for view_name in view_names:
+                    sub = cond_df[cond_df["view"].astype(str) == view_name].copy()
+                    values = pd.to_numeric(sub["value"], errors="coerce").dropna()
+                    if values.empty:
+                        continue
+                    x = x_positions[view_name] + offset
+                    jitter = rng.uniform(-0.035, 0.035, size=len(values))
+                    ax.scatter(
+                        np.full(len(values), x, dtype=float) + jitter,
+                        values.to_numpy(dtype=float),
+                        s=24,
+                        color=color,
+                        marker=marker,
+                        alpha=0.50,
+                        edgecolors="none",
+                        zorder=3,
+                    )
+                    ax.errorbar(
+                        x,
+                        float(values.mean()),
+                        yerr=sem(values.to_numpy(dtype=float)),
+                        fmt=marker,
+                        color="black",
+                        markerfacecolor="white",
+                        markeredgecolor="black",
+                        markersize=7.2,
+                        elinewidth=1.3,
+                        capsize=3,
+                        linestyle="None",
+                        zorder=5,
+                    )
+
+            if metric == "bias_b":
+                ax.axhline(0, color="0.55", linestyle="--", linewidth=1.0, zorder=0)
+            elif metric == "prop_correct":
+                ax.axhline(0.5, color="0.55", linestyle=":", linewidth=1.0, zorder=0)
+                ax.set_ylim(0, 1)
+            if row == 0:
+                ax.set_title(title, fontsize=fs, pad=style.title_pad)
+            if col == 0:
+                ax.set_ylabel(f"{duration_label}\n{ylabel}", fontsize=fs, color="black")
+            ax.set_xticks(list(x_positions.values()))
+            ax.set_xticklabels(view_names, rotation=25, ha="right", fontsize=fs)
+            ax.tick_params(axis="y", labelsize=fs)
+            ax.grid(True, axis="x", linestyle=":", alpha=0.25)
+            for spine in ["right", "top"]:
+                ax.spines[spine].set_visible(False)
+
+    handles = [
+        Line2D(
+            [],
+            [],
+            color=BLOCK_COLORS.get(condition, f"C{i}"),
+            marker=BLOCK_STYLES.get(condition, {}).get("marker", "o"),
+            linestyle="None",
+            markerfacecolor=BLOCK_COLORS.get(condition, f"C{i}"),
+            markeredgecolor=BLOCK_COLORS.get(condition, f"C{i}"),
+            label=condition,
+        )
+        for i, condition in enumerate(condition_names)
+    ]
+    fig.legend(
+        handles=handles,
+        labels=condition_names,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.012),
+        ncol=min(4, max(1, len(condition_names))),
+        fontsize=fs,
+        frameon=False,
+    )
+    fig.suptitle("Biased blocks summary by stim duration - mean of ABLs 20, 40, 60", fontsize=fs, y=0.995)
+    fig.tight_layout(rect=[0, 0.08, 1, 0.96])
+    if show:
+        plt.show()
+    return fig
 
 
 def plot_block_condition_summary_metrics(
@@ -1515,13 +2363,35 @@ def plot_block_condition_summary_metrics(
     fig.tight_layout(rect=[0, 0.12, 1, 0.92])
     if show:
         plt.show()
-    return {
+    outputs = {
         "summary": {
             "figure": fig,
             "metrics": metrics,
             "abls": MEAN_ABL_TARGETS,
         }
     }
+    try:
+        duration_metrics = _collect_block_condition_summary_metrics_by_duration(
+            bundle,
+            views=views,
+            block_conditions=condition_names,
+        )
+    except (KeyError, ValueError):
+        duration_metrics = pd.DataFrame()
+    if not duration_metrics.empty:
+        duration_fig = _plot_block_condition_summary_duration_rows(
+            metrics=duration_metrics,
+            views=views,
+            condition_names=condition_names,
+            style=style,
+            show=show,
+        )
+        outputs["duration_rows"] = {
+            "figure": duration_fig,
+            "metrics": duration_metrics,
+            "abls": MEAN_ABL_TARGETS,
+        }
+    return outputs
 
 
 def _std(values) -> float:
@@ -1591,7 +2461,7 @@ def _plot_block_bias_panels(
         n_cols,
         figsize=(4.2 * n_cols, 3.8 * n_rows),
         squeeze=False,
-        sharey=True,
+        sharey=False,
     )
     flat_axes = axes.ravel()
 
@@ -1603,6 +2473,10 @@ def _plot_block_bias_panels(
         else:
             sub = panel_df[panel_df[panel_col].astype(str) == str(panel_name)].copy()
             err_col = "std"
+        y_lim = _bias_ylim_from_values(
+            sub.get("mean", pd.Series(dtype=float)),
+            sub.get(err_col, pd.Series(dtype=float)),
+        )
 
         for condition in condition_order:
             rows = sub[sub["block_condition"].astype(str) == condition]
@@ -1628,6 +2502,8 @@ def _plot_block_bias_panels(
             )
 
         ax.axhline(0, color="0.55", linestyle="--", linewidth=1.0, zorder=0)
+        if y_lim is not None:
+            ax.set_ylim(*y_lim)
         ax.set_title(str(panel_name), fontsize=fs, pad=8)
         ax.set_xticks(list(x_positions.values()))
         ax.set_xticklabels(condition_order, rotation=25, ha="right", fontsize=fs)
@@ -1662,7 +2538,191 @@ def _plot_block_bias_panels(
         frameon=False,
     )
     fig.suptitle(title, fontsize=fs, y=0.99)
-    fig.tight_layout(rect=[0, 0.07, 1, 0.94])
+    fig.tight_layout(rect=[0, 0.10, 1, 0.92], h_pad=2.0, w_pad=1.2)
+    return fig
+
+
+def _bias_ylim_from_values(
+    means,
+    errors=None,
+    *,
+    pad_frac: float = 0.18,
+    min_pad: float = 0.05,
+) -> tuple[float, float] | None:
+    mean_series = pd.to_numeric(pd.Series(means), errors="coerce")
+    if errors is None:
+        err_series = pd.Series(0.0, index=mean_series.index)
+    else:
+        err_series = pd.to_numeric(pd.Series(errors), errors="coerce").fillna(0.0).abs()
+        err_series.index = mean_series.index
+    finite = mean_series.notna()
+    if not finite.any():
+        return None
+    low_values = mean_series[finite] - err_series[finite]
+    high_values = mean_series[finite] + err_series[finite]
+    y_min = float(low_values.min())
+    y_max = float(high_values.max())
+    if not np.isfinite(y_min) or not np.isfinite(y_max):
+        return None
+    pad = max((y_max - y_min) * pad_frac, min_pad)
+    return (min(y_min - pad, -0.02), max(y_max + pad, 0.02))
+
+
+def _collect_block_bias_duration_abl_by_view(
+    df_scope: pd.DataFrame,
+    views: list[ViewSpec],
+) -> pd.DataFrame:
+    duration_col = _duration_column(df_scope)
+    rows = []
+    for view in views:
+        df_view = view.selector(df_scope)
+        if df_view.empty:
+            continue
+        group_cols = [
+            c for c in ["animal", duration_col, "ABL", "block_condition"]
+            if c in df_view.columns
+        ]
+        if len(group_cols) < 4:
+            continue
+        for key, sub in df_view.groupby(group_cols, dropna=False, sort=False):
+            values = key if isinstance(key, tuple) else (key,)
+            row = dict(zip(group_cols, values))
+            if pd.isna(row.get("animal")) or pd.isna(row.get(duration_col)) or pd.isna(row.get("ABL")):
+                continue
+            rows.append(
+                {
+                    "view": view.name,
+                    "animal": str(row["animal"]),
+                    "duration": row[duration_col],
+                    "duration_label": _format_stim_duration_title(row[duration_col]),
+                    "ABL": int(float(row["ABL"])),
+                    "block_condition": str(row["block_condition"]),
+                    "mean": DataHelpers.compute_bias(sub),
+                    "n_trials": len(sub),
+                }
+            )
+    if not rows:
+        return pd.DataFrame(columns=["view", "animal", "duration", "duration_label", "ABL", "block_condition", "mean", "n_trials"])
+    out = pd.DataFrame(rows)
+    out = out[pd.to_numeric(out["ABL"], errors="coerce").isin(MEAN_ABL_TARGETS)].copy()
+    return out
+
+
+def _plot_block_bias_duration_abl_summary(
+    *,
+    animal_bias: pd.DataFrame,
+    views: list[ViewSpec],
+    style: PlotStyle,
+    show: bool,
+) -> plt.Figure | None:
+    if animal_bias.empty:
+        return None
+    duration_values = sorted(animal_bias["duration"].dropna().unique(), key=_duration_sort_key)
+    view_order = [v.name for v in views if v.name in set(animal_bias["view"].astype(str))]
+    panel_names = view_order + ["Mean"]
+    condition_order = [c for c in BLOCK_ORDER if c in set(animal_bias["block_condition"].dropna().astype(str))]
+    if not condition_order:
+        condition_order = sorted(animal_bias["block_condition"].dropna().astype(str).unique())
+    x_positions = {condition: i for i, condition in enumerate(condition_order)}
+    abl_offsets = {20: -0.12, 40: 0.0, 60: 0.12}
+    abl_markers = {20: "o", 40: "s", 60: "^"}
+    fs = style.legend_fs
+
+    fig, axes = plt.subplots(
+        len(duration_values),
+        len(panel_names),
+        figsize=(4.0 * len(panel_names), max(3.2 * len(duration_values), 3.2)),
+        squeeze=False,
+        sharey=False,
+        sharex=False,
+    )
+
+    for row, duration in enumerate(duration_values):
+        duration_label = _format_stim_duration_title(duration)
+        duration_df = animal_bias[animal_bias["duration"].eq(duration)].copy()
+        for col, panel_name in enumerate(panel_names):
+            ax = axes[row, col]
+            if panel_name == "Mean":
+                panel_df = duration_df.copy()
+            else:
+                panel_df = duration_df[duration_df["view"].astype(str).eq(panel_name)].copy()
+            limit_means = []
+            limit_errors = []
+
+            for condition in condition_order:
+                for abl in MEAN_ABL_TARGETS:
+                    sub = panel_df[
+                        panel_df["block_condition"].astype(str).eq(condition)
+                        & panel_df["ABL"].eq(int(abl))
+                    ]
+                    values = pd.to_numeric(sub["mean"], errors="coerce").dropna()
+                    if values.empty:
+                        continue
+                    mean_value = float(values.mean())
+                    sem_value = sem(values.to_numpy(dtype=float))
+                    limit_means.append(mean_value)
+                    limit_errors.append(sem_value)
+                    x = x_positions[condition] + abl_offsets.get(int(abl), 0.0)
+                    color = _block_abl_color(condition, int(abl))
+                    ax.errorbar(
+                        x,
+                        mean_value,
+                        yerr=sem_value,
+                        fmt=abl_markers.get(int(abl), "o"),
+                        color=color,
+                        markerfacecolor=color,
+                        markeredgecolor=color,
+                        markersize=7.0,
+                        elinewidth=1.2,
+                        capsize=2.5,
+                        linestyle="None",
+                        zorder=4,
+                    )
+
+            ax.axhline(0, color="0.55", linestyle="--", linewidth=1.0, zorder=0)
+            y_lim = _bias_ylim_from_values(limit_means, limit_errors)
+            if y_lim is not None:
+                ax.set_ylim(*y_lim)
+            if row == 0:
+                ax.set_title(str(panel_name), fontsize=fs, pad=8)
+            if col == 0:
+                ax.set_ylabel(f"{duration_label}\nBias", fontsize=fs)
+            ax.set_xticks(list(x_positions.values()))
+            ax.set_xticklabels(condition_order, rotation=25, ha="right", fontsize=fs)
+            ax.tick_params(axis="both", labelsize=fs)
+            for spine in ["right", "top"]:
+                ax.spines[spine].set_visible(False)
+
+    handles = []
+    labels = []
+    for condition in condition_order:
+        for abl in MEAN_ABL_TARGETS:
+            color = _block_abl_color(condition, int(abl))
+            labels.append(f"{condition} ABL {abl}")
+            handles.append(
+                Line2D(
+                    [],
+                    [],
+                    color=color,
+                    marker=abl_markers.get(int(abl), "o"),
+                    linestyle="None",
+                    markerfacecolor=color,
+                    markeredgecolor=color,
+                )
+            )
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.012),
+        ncol=min(6, max(1, len(labels))),
+        fontsize=fs,
+        frameon=False,
+    )
+    fig.suptitle("Block bias by genotype/view, stim duration, and ABL", fontsize=fs, y=0.995)
+    fig.tight_layout(rect=[0, 0.11, 1, 0.92], h_pad=2.0, w_pad=1.2)
+    if show:
+        plt.show()
     return fig
 
 
@@ -1735,7 +2795,7 @@ def plot_block_bias_figures(
     if show:
         plt.show()
 
-    return {
+    outputs = {
         "animals": {
             "figure": fig_animals,
             "session_bias": session_bias,
@@ -1748,6 +2808,23 @@ def plot_block_bias_figures(
             "mean_bias": mean_by_view,
         },
     }
+    try:
+        duration_abl_bias = _collect_block_bias_duration_abl_by_view(df_scope, views)
+    except (KeyError, ValueError):
+        duration_abl_bias = pd.DataFrame()
+    duration_abl_fig = _plot_block_bias_duration_abl_summary(
+        animal_bias=duration_abl_bias,
+        views=views,
+        style=style,
+        show=show,
+    )
+    if duration_abl_fig is not None:
+        outputs["genotypes_duration_abls"] = {
+            "figure": duration_abl_fig,
+            "animal_bias": duration_abl_bias,
+            "abls": MEAN_ABL_TARGETS,
+        }
+    return outputs
 
 
 def _choice_right_series(df: pd.DataFrame) -> pd.Series:
@@ -2261,6 +3338,541 @@ def _animal_transition_accuracy_trace(window_df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _session23_delta_points(
+    df_blocks: pd.DataFrame,
+    *,
+    separate_abls: bool = True,
+    rightward_ild_sign: int = 1,
+    include_duration: bool = False,
+    metric: str = "accuracy",
+) -> pd.DataFrame:
+    if df_blocks.empty:
+        return pd.DataFrame(
+            columns=[
+                "animal",
+                "genotype",
+                "line",
+                "cohort",
+                "dataset_key",
+                "session",
+                "session_type",
+                "session_type_23_index",
+                "duration",
+                "duration_label",
+                "ABL",
+                "accuracy_delta",
+                "rt_delta",
+                "n_favored",
+                "n_unfavored",
+            ]
+        )
+    metric = str(metric).lower()
+    if metric not in {"accuracy", "rt"}:
+        raise ValueError("metric must be 'accuracy' or 'rt'.")
+    required = {"animal", "session", "session_type", "ILD", "success", "block_condition"}
+    if metric == "rt":
+        required.add("timed_rt")
+    missing = sorted(required - set(df_blocks.columns))
+    if missing:
+        raise KeyError(f"Need columns {missing} to compute session-23 favored-side {metric} delta.")
+
+    df = df_blocks.copy()
+    session_type = pd.to_numeric(df["session_type"], errors="coerce")
+    df = df[session_type.eq(23)].copy()
+    if df.empty:
+        return pd.DataFrame()
+
+    success = pd.to_numeric(df["success"], errors="coerce")
+    if metric == "accuracy":
+        df = df[success.ne(0)].copy()
+        df["metric_value"] = success.loc[df.index].eq(1).astype(float)
+        delta_col = "accuracy_delta"
+        mean_col = "accuracy"
+    else:
+        df["timed_rt"] = pd.to_numeric(df["timed_rt"], errors="coerce")
+        df = df[success.eq(1) & df["timed_rt"].notna()].copy()
+        df["metric_value"] = df["timed_rt"].astype(float)
+        delta_col = "rt_delta"
+        mean_col = "mean_rt"
+    ild = pd.to_numeric(df["ILD"], errors="coerce")
+    ild_sign = np.sign(ild)
+    block_condition = df["block_condition"].astype(str).str.lower()
+    rightward_sign = 1 if int(rightward_ild_sign) >= 0 else -1
+    favored_sign = np.select(
+        [block_condition.eq("rightward"), block_condition.eq("leftward")],
+        [rightward_sign, -rightward_sign],
+        default=np.nan,
+    )
+    df["evidence_alignment"] = np.select(
+        [ild_sign.eq(favored_sign), ild_sign.eq(-favored_sign)],
+        ["favored", "unfavored"],
+        default=pd.NA,
+    )
+    df = df[df["evidence_alignment"].notna() & df["metric_value"].notna()].copy()
+    if df.empty:
+        return pd.DataFrame()
+    if not separate_abls:
+        df["ABL"] = 0
+    duration_col = None
+    if include_duration:
+        try:
+            duration_col = _duration_column(df)
+        except KeyError:
+            duration_col = None
+        if duration_col is not None:
+            df["duration"] = pd.to_numeric(df[duration_col], errors="coerce")
+            df["duration_label"] = df["duration"].map(_format_stim_duration_title)
+
+    session_keys = [c for c in ["dataset_key", "animal", "session"] if c in df.columns]
+    session_order = (
+        df[session_keys]
+        .drop_duplicates()
+        .sort_values(session_keys, kind="stable")
+        .copy()
+    )
+    order_keys = [c for c in ["dataset_key", "animal"] if c in session_order.columns]
+    session_order["session_type_23_index"] = session_order.groupby(order_keys, dropna=False).cumcount() + 1
+    df = df.merge(session_order, on=session_keys, how="left")
+
+    group_cols = [
+        c
+        for c in [
+            "animal",
+            "genotype",
+            "line",
+            "cohort",
+            "dataset_key",
+            "session",
+            "session_type",
+            "session_type_23_index",
+            "duration",
+            "duration_label",
+            "ABL",
+            "evidence_alignment",
+        ]
+        if c in df.columns and (include_duration or c not in {"duration", "duration_label"})
+    ]
+    metrics = (
+        df.groupby(group_cols, dropna=False)["metric_value"]
+        .agg(**{mean_col: "mean"}, n_trials="count")
+        .reset_index()
+    )
+    index_cols = [c for c in group_cols if c != "evidence_alignment"]
+    mean_wide = metrics.pivot_table(index=index_cols, columns="evidence_alignment", values=mean_col, aggfunc="mean").reset_index()
+    count_wide = metrics.pivot_table(index=index_cols, columns="evidence_alignment", values="n_trials", aggfunc="sum").reset_index()
+    count_wide = count_wide.rename(columns={"favored": "n_favored", "unfavored": "n_unfavored"})
+    if "favored" not in mean_wide.columns or "unfavored" not in mean_wide.columns:
+        return pd.DataFrame()
+
+    out = mean_wide.merge(
+        count_wide[[*index_cols, "n_favored", "n_unfavored"]],
+        on=index_cols,
+        how="left",
+    )
+    out[delta_col] = out["favored"] - out["unfavored"]
+    out = out[out[delta_col].notna()].copy()
+    keep_cols = index_cols + [delta_col, "n_favored", "n_unfavored"]
+    return out[keep_cols].reset_index(drop=True)
+
+
+def plot_session23_delta_figures(
+    bundle: dict[str, Any],
+    *,
+    views: list[ViewSpec] | None = None,
+    abls: tuple[int, ...] = (20, 40, 60),
+    separate_abls: bool = True,
+    view_colors: dict[str, str] | None = None,
+    metric: str = "accuracy",
+    show: bool = True,
+) -> dict[str, Any]:
+    """Plot per-animal, per-session favored-side accuracy or RT delta across session-type 23 sessions."""
+    df_blocks = bundle["df_blocks"]
+    style = bundle["style"]
+    views = views or bundle["views"]
+    view_colors = view_colors or {}
+    plot_abls = abls if separate_abls else (0,)
+    rightward_ild_sign = int(bundle.get("rightward_ild_sign", 1))
+    fs = style.legend_fs
+    metric = str(metric).lower()
+    if metric not in {"accuracy", "rt"}:
+        raise ValueError("metric must be 'accuracy' or 'rt'.")
+    delta_col = "accuracy_delta" if metric == "accuracy" else "rt_delta"
+    y_label = "Accuracy Delta" if metric == "accuracy" else "RT Delta"
+    title_metric = "accuracy" if metric == "accuracy" else "RT"
+
+    view_payloads: dict[str, pd.DataFrame] = {}
+    summary_payloads: dict[str, pd.DataFrame] = {}
+    for view in views:
+        df_view = view.selector(df_blocks)
+        points = _session23_delta_points(
+            df_view,
+            separate_abls=separate_abls,
+            rightward_ild_sign=rightward_ild_sign,
+            metric=metric,
+        )
+        if points.empty:
+            continue
+        points["view"] = view.name
+        view_payloads[view.name] = points
+        group_cols = ["session_type_23_index", "ABL"]
+        summary = (
+            points.groupby(group_cols, dropna=False)[delta_col]
+            .agg(mean="mean", sem=sem, std=_std, n_sessions="count", n_animals=lambda s: points.loc[s.index, "animal"].nunique())
+            .reset_index()
+        )
+        summary["view"] = view.name
+        summary_payloads[view.name] = summary
+
+    if not summary_payloads:
+        return {}
+
+    all_points = pd.concat(view_payloads.values(), ignore_index=True, sort=False)
+    all_summary = pd.concat(summary_payloads.values(), ignore_index=True, sort=False)
+    y_lim = _transition_value_ylim([all_points], delta_col)
+
+    fig, axes = plt.subplots(
+        1,
+        len(plot_abls),
+        figsize=(5.2 * len(plot_abls), 5.5),
+        squeeze=False,
+        sharey=True,
+    )
+    axes = axes.ravel()
+
+    for ax, abl in zip(axes, plot_abls):
+        for i, view in enumerate(views):
+            points = view_payloads.get(view.name)
+            if points is None or points.empty:
+                continue
+            color = view_colors.get(view.name, f"C{i % 10}")
+            sub_points = points[pd.to_numeric(points["ABL"], errors="coerce").eq(abl)].copy()
+            if sub_points.empty:
+                continue
+            for _, animal_df in sub_points.groupby("animal", dropna=False, sort=False):
+                animal_df = animal_df.sort_values("session_type_23_index", kind="stable")
+                ax.plot(
+                    animal_df["session_type_23_index"].to_numpy(dtype=float),
+                    animal_df[delta_col].to_numpy(dtype=float),
+                    color=color,
+                    alpha=0.18,
+                    linewidth=1.0,
+                    marker="o",
+                    markersize=3.0,
+                    linestyle="-",
+                    zorder=1,
+                )
+
+            summary = summary_payloads.get(view.name, pd.DataFrame())
+            sub_summary = summary[pd.to_numeric(summary["ABL"], errors="coerce").eq(abl)].copy()
+            if sub_summary.empty:
+                continue
+            sub_summary = sub_summary.sort_values("session_type_23_index", kind="stable")
+            x = sub_summary["session_type_23_index"].to_numpy(dtype=float)
+            y = sub_summary["mean"].to_numpy(dtype=float)
+            yerr = pd.to_numeric(sub_summary["sem"], errors="coerce").to_numpy(dtype=float)
+            ax.plot(
+                x,
+                y,
+                color=color,
+                marker="o",
+                markersize=5.0,
+                linewidth=2.0,
+                label=view.name,
+                zorder=4,
+            )
+            finite = np.isfinite(x) & np.isfinite(y) & np.isfinite(yerr)
+            if finite.any():
+                ax.fill_between(
+                    x[finite],
+                    y[finite] - yerr[finite],
+                    y[finite] + yerr[finite],
+                    color=color,
+                    alpha=0.18,
+                    linewidth=0,
+                    zorder=2,
+                )
+
+        ax.axhline(0.0, color="0.6", linestyle=":", linewidth=1.0, zorder=0)
+        ax.set_title(f"ABL {abl}" if separate_abls else "All ABLs", fontsize=fs, pad=8)
+        ax.set_xlabel("Session index within session type 23", fontsize=fs)
+        ax.set_ylim(*y_lim)
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.tick_params(axis="both", labelsize=fs)
+        for spine in ["right", "top"]:
+            ax.spines[spine].set_visible(False)
+
+    axes[0].set_ylabel(y_label, fontsize=fs)
+    handles = [
+        Line2D([], [], color=view_colors.get(view.name, f"C{i % 10}"), marker="o", linestyle="-", label=view.name)
+        for i, view in enumerate(views)
+        if view.name in summary_payloads
+    ]
+    labels = [h.get_label() for h in handles]
+    if handles:
+        fig.legend(
+            handles=handles,
+            labels=labels,
+            loc="lower center",
+            bbox_to_anchor=(0.5, -0.01),
+            ncol=max(1, min(4, len(handles))),
+            fontsize=fs,
+            frameon=False,
+        )
+    duration_label = _stim_duration_title_from_bundle(bundle)
+    fig.suptitle(f"Session type 23 favored-side {title_metric} delta ({duration_label})", fontsize=fs, y=0.99)
+    fig.tight_layout(rect=[0, 0.10, 1, 0.93])
+    if show:
+        plt.show()
+
+    abl_figures: dict[str, dict[str, Any]] = {}
+    if separate_abls and len(plot_abls) > 1:
+        for abl in plot_abls:
+            fig_abl, ax_abl = plt.subplots(1, 1, figsize=(6.0, 5.5), squeeze=True)
+            for i, view in enumerate(views):
+                points = view_payloads.get(view.name)
+                if points is None or points.empty:
+                    continue
+                color = view_colors.get(view.name, f"C{i % 10}")
+                sub_points = points[pd.to_numeric(points["ABL"], errors="coerce").eq(abl)].copy()
+                if sub_points.empty:
+                    continue
+                for _, animal_df in sub_points.groupby("animal", dropna=False, sort=False):
+                    animal_df = animal_df.sort_values("session_type_23_index", kind="stable")
+                    ax_abl.plot(
+                        animal_df["session_type_23_index"].to_numpy(dtype=float),
+                        animal_df[delta_col].to_numpy(dtype=float),
+                        color=color,
+                        alpha=0.18,
+                        linewidth=1.0,
+                        marker="o",
+                        markersize=3.0,
+                        linestyle="-",
+                        zorder=1,
+                    )
+
+                summary = summary_payloads.get(view.name, pd.DataFrame())
+                sub_summary = summary[pd.to_numeric(summary["ABL"], errors="coerce").eq(abl)].copy()
+                if sub_summary.empty:
+                    continue
+                sub_summary = sub_summary.sort_values("session_type_23_index", kind="stable")
+                x = sub_summary["session_type_23_index"].to_numpy(dtype=float)
+                y = sub_summary["mean"].to_numpy(dtype=float)
+                yerr = pd.to_numeric(sub_summary["sem"], errors="coerce").to_numpy(dtype=float)
+                ax_abl.plot(
+                    x,
+                    y,
+                    color=color,
+                    marker="o",
+                    markersize=5.0,
+                    linewidth=2.0,
+                    label=view.name,
+                    zorder=4,
+                )
+                finite = np.isfinite(x) & np.isfinite(y) & np.isfinite(yerr)
+                if finite.any():
+                    ax_abl.fill_between(
+                        x[finite],
+                        y[finite] - yerr[finite],
+                        y[finite] + yerr[finite],
+                        color=color,
+                        alpha=0.18,
+                        linewidth=0,
+                        zorder=2,
+                    )
+
+            ax_abl.axhline(0.0, color="0.6", linestyle=":", linewidth=1.0, zorder=0)
+            ax_abl.set_title(f"ABL {abl}", fontsize=fs, pad=8)
+            ax_abl.set_xlabel("Session index within session type 23", fontsize=fs)
+            ax_abl.set_ylabel(y_label, fontsize=fs)
+            ax_abl.set_ylim(*y_lim)
+            ax_abl.xaxis.set_major_locator(MaxNLocator(integer=True))
+            ax_abl.tick_params(axis="both", labelsize=fs)
+            for spine in ["right", "top"]:
+                ax_abl.spines[spine].set_visible(False)
+            handles_abl, labels_abl = ax_abl.get_legend_handles_labels()
+            if handles_abl:
+                fig_abl.legend(
+                    handles_abl,
+                    labels_abl,
+                    loc="lower center",
+                    bbox_to_anchor=(0.5, -0.01),
+                    ncol=max(1, min(4, len(labels_abl))),
+                    fontsize=fs,
+                    frameon=False,
+                )
+            fig_abl.suptitle(f"Session type 23 favored-side {title_metric} delta - ABL {abl} ({duration_label})", fontsize=fs, y=0.99)
+            fig_abl.tight_layout(rect=[0, 0.10, 1, 0.93])
+            if show:
+                plt.show()
+            abl_figures[str(abl)] = {"figure": fig_abl, "ABL": abl}
+
+    duration_outputs: dict[str, dict[str, Any]] = {}
+    duration_payloads: dict[str, pd.DataFrame] = {}
+    duration_summaries: dict[str, pd.DataFrame] = {}
+    for view in views:
+        df_view = view.selector(df_blocks)
+        duration_points = _session23_delta_points(
+            df_view,
+            separate_abls=separate_abls,
+            rightward_ild_sign=rightward_ild_sign,
+            include_duration=True,
+            metric=metric,
+        )
+        if duration_points.empty or "duration" not in duration_points:
+            continue
+        duration_points["view"] = view.name
+        duration_payloads[view.name] = duration_points
+        duration_summary = (
+            duration_points.groupby(["duration", "duration_label", "session_type_23_index", "ABL"], dropna=False)[
+                delta_col
+            ]
+            .agg(mean="mean", sem=sem, std=_std, n_sessions="count", n_animals=lambda s: duration_points.loc[s.index, "animal"].nunique())
+            .reset_index()
+        )
+        duration_summary["view"] = view.name
+        duration_summaries[view.name] = duration_summary
+
+    for view in views:
+        duration_summary = duration_summaries.get(view.name)
+        if duration_summary is None or duration_summary.empty:
+            continue
+        duration_values = sorted(duration_summary["duration"].dropna().unique(), key=_duration_sort_key)
+        if not duration_values:
+            continue
+        duration_color_map = {
+            duration: plt.get_cmap("tab10")(idx % 10)
+            for idx, duration in enumerate(duration_values)
+        }
+        duration_ylim = _transition_value_ylim([duration_summary], "mean")
+        fig_duration, duration_axes = plt.subplots(
+            1,
+            len(plot_abls),
+            figsize=(5.2 * len(plot_abls), 5.5),
+            squeeze=False,
+            sharey=True,
+        )
+        duration_axes = duration_axes.ravel()
+        for ax, abl in zip(duration_axes, plot_abls):
+            for duration in duration_values:
+                sub = duration_summary[
+                    pd.to_numeric(duration_summary["ABL"], errors="coerce").eq(abl)
+                    & duration_summary["duration"].eq(duration)
+                ].copy()
+                if sub.empty:
+                    continue
+                sub = sub.sort_values("session_type_23_index", kind="stable")
+                x = sub["session_type_23_index"].to_numpy(dtype=float)
+                y = sub["mean"].to_numpy(dtype=float)
+                yerr = pd.to_numeric(sub["sem"], errors="coerce").to_numpy(dtype=float)
+                color = duration_color_map[duration]
+                label = _format_stim_duration_title(duration)
+                ax.plot(
+                    x,
+                    y,
+                    color=color,
+                    marker="o",
+                    markersize=4.5,
+                    linewidth=2.0,
+                    label=label,
+                    zorder=4,
+                )
+                finite = np.isfinite(x) & np.isfinite(y) & np.isfinite(yerr)
+                if finite.any():
+                    ax.fill_between(
+                        x[finite],
+                        y[finite] - yerr[finite],
+                        y[finite] + yerr[finite],
+                        color=color,
+                        alpha=0.16,
+                        linewidth=0,
+                        zorder=2,
+                    )
+
+            ax.axhline(0.0, color="0.6", linestyle=":", linewidth=1.0, zorder=0)
+            ax.set_title(f"ABL {abl}" if separate_abls else "All ABLs", fontsize=fs, pad=8)
+            ax.set_xlabel("Session index within session type 23", fontsize=fs)
+            ax.set_ylim(*duration_ylim)
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+            ax.tick_params(axis="both", labelsize=fs)
+            for spine in ["right", "top"]:
+                ax.spines[spine].set_visible(False)
+
+        duration_axes[0].set_ylabel(y_label, fontsize=fs)
+        handles_duration, labels_duration = duration_axes[0].get_legend_handles_labels()
+        if handles_duration:
+            fig_duration.legend(
+                handles_duration,
+                labels_duration,
+                loc="lower center",
+                bbox_to_anchor=(0.5, -0.01),
+                ncol=max(1, min(5, len(labels_duration))),
+                fontsize=fs,
+                frameon=False,
+            )
+        fig_duration.suptitle(f"{view.name} - session type 23 {title_metric} delta by stim duration", fontsize=fs, y=0.99)
+        fig_duration.tight_layout(rect=[0, 0.10, 1, 0.93])
+        if show:
+            plt.show()
+        duration_outputs[view.name] = {
+            "figure": fig_duration,
+            "summary": duration_summary,
+            "points": duration_payloads.get(view.name, pd.DataFrame()),
+            "separate_abls": separate_abls,
+        }
+
+    outputs = {
+        "figure": fig,
+        "points": all_points,
+        "summary": all_summary,
+        "separate_abls": separate_abls,
+    }
+    if abl_figures:
+        outputs["abl_figures"] = abl_figures
+    if duration_outputs:
+        outputs["duration_by_view"] = duration_outputs
+    return outputs
+
+
+def plot_session23_accuracy_delta_figures(
+    bundle: dict[str, Any],
+    *,
+    views: list[ViewSpec] | None = None,
+    abls: tuple[int, ...] = (20, 40, 60),
+    separate_abls: bool = True,
+    view_colors: dict[str, str] | None = None,
+    show: bool = True,
+) -> dict[str, Any]:
+    return plot_session23_delta_figures(
+        bundle,
+        views=views,
+        abls=abls,
+        separate_abls=separate_abls,
+        view_colors=view_colors,
+        metric="accuracy",
+        show=show,
+    )
+
+
+def plot_session23_rt_delta_figures(
+    bundle: dict[str, Any],
+    *,
+    views: list[ViewSpec] | None = None,
+    abls: tuple[int, ...] = (20, 40, 60),
+    separate_abls: bool = True,
+    view_colors: dict[str, str] | None = None,
+    show: bool = True,
+) -> dict[str, Any]:
+    return plot_session23_delta_figures(
+        bundle,
+        views=views,
+        abls=abls,
+        separate_abls=separate_abls,
+        view_colors=view_colors,
+        metric="rt",
+        show=show,
+    )
+
+
 def _animal_mean_rt_transition_trace(window_df: pd.DataFrame) -> pd.DataFrame:
     """Pool all ILDs into one correct-trial mean RT for each animal and trial index."""
     columns = [
@@ -2343,6 +3955,8 @@ def _format_stim_duration_title(value: Any) -> str:
     if value is None:
         return "stim durations: all"
     if isinstance(value, str):
+        if value.strip() == "0":
+            return "stim duration: RT"
         return f"stim durations: {value}"
     if isinstance(value, Iterable):
         values = []
@@ -2352,12 +3966,14 @@ def _format_stim_duration_title(value: Any) -> str:
             except (TypeError, ValueError):
                 values.append(str(item))
                 continue
-            values.append(str(int(item_float)) if item_float.is_integer() else f"{item_float:g}")
+            values.append("RT" if item_float == 0 else (str(int(item_float)) if item_float.is_integer() else f"{item_float:g}"))
         return "stim durations: " + ", ".join(values)
     try:
         value_float = float(value)
     except (TypeError, ValueError):
         return f"stim durations: {value}"
+    if value_float == 0:
+        return "stim duration: RT"
     label = str(int(value_float)) if value_float.is_integer() else f"{value_float:g}"
     return f"stim duration: {label}"
 
@@ -2629,13 +4245,35 @@ def _add_fit_parameter_inset(
         return
 
     inset = ax.inset_axes([0.53, 0.06, 0.42, 0.32])
+    _draw_fit_parameter_axis(
+        inset,
+        parameter_rows,
+        label_header=label_header,
+        fontsize=fontsize,
+        compact=True,
+    )
+
+
+def _draw_fit_parameter_axis(
+    ax: plt.Axes,
+    parameter_rows: list[tuple[str, np.ndarray, np.ndarray]],
+    *,
+    label_header: str,
+    fontsize: float,
+    compact: bool = False,
+) -> None:
+    """Draw fit-parameter scatter/errorbars on an existing axis."""
+    if not parameter_rows:
+        ax.axis("off")
+        return
+
     labels = [str(label) for label, _, _ in parameter_rows]
     x = np.arange(len(parameter_rows), dtype=float)
     parameter_values = np.asarray([params for _, params, _ in parameter_rows], dtype=float)
     parameter_errors = np.asarray([errors for _, _, errors in parameter_rows], dtype=float)
     parameter_colors = {"a": "#1B9E77", "b": "#D95F02", "c": "#7570B3"}
     for index, parameter_name in enumerate(["a", "b", "c"]):
-        inset.errorbar(
+        ax.errorbar(
             x,
             parameter_values[:, index],
             yerr=parameter_errors[:, index],
@@ -2646,14 +4284,46 @@ def _add_fit_parameter_inset(
             label=parameter_name,
             zorder=3,
         )
-    inset.axhline(0.0, color="0.75", linewidth=0.7)
-    inset.set_xticks(x)
-    inset.set_xticklabels(labels, fontsize=max(5, fontsize - 12))
-    inset.tick_params(axis="y", labelsize=max(5, fontsize - 12), length=2)
-    inset.set_title(f"{label_header} fit parameters", fontsize=max(5, fontsize - 11), pad=2)
-    inset.legend(fontsize=max(5, fontsize - 13), frameon=False, ncol=3, loc="upper center", handletextpad=0.2, columnspacing=0.5)
+    tick_fs = max(5, fontsize - (12 if compact else 2))
+    title_fs = max(5, fontsize - (11 if compact else 1))
+    legend_fs = max(5, fontsize - (13 if compact else 3))
+    ax.axhline(0.0, color="0.75", linewidth=0.7)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=tick_fs, rotation=25 if not compact else 0, ha="right" if not compact else "center")
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=3))
+    ax.tick_params(axis="y", labelsize=tick_fs, length=2)
+    ax.set_title(f"{label_header} fit parameters", fontsize=title_fs, pad=2)
+    ax.legend(fontsize=legend_fs, frameon=False, ncol=3, loc="upper center", handletextpad=0.2, columnspacing=0.5)
     for spine in ["right", "top"]:
-        inset.spines[spine].set_visible(False)
+        ax.spines[spine].set_visible(False)
+
+
+def _transition_value_ylim(
+    traces,
+    value_col: str,
+    *,
+    sem_col: str = "sem",
+    pad_frac: float = 0.18,
+    min_pad: float = 0.04,
+) -> tuple[float, float]:
+    lows = [0.0]
+    highs = [0.0]
+    for trace in traces:
+        if trace is None or trace.empty or value_col not in trace:
+            continue
+        values = pd.to_numeric(trace[value_col], errors="coerce")
+        errors = pd.to_numeric(trace.get(sem_col, pd.Series(0.0, index=trace.index)), errors="coerce").fillna(0.0).abs()
+        finite = values.notna()
+        if not finite.any():
+            continue
+        lows.extend((values[finite] - errors[finite]).to_numpy(dtype=float).tolist())
+        highs.extend((values[finite] + errors[finite]).to_numpy(dtype=float).tolist())
+    y_min = float(np.nanmin(lows))
+    y_max = float(np.nanmax(highs))
+    if not np.isfinite(y_min) or not np.isfinite(y_max):
+        return (-0.25, 0.25)
+    pad = max((y_max - y_min) * pad_frac, min_pad)
+    return y_min - pad, y_max + pad
 
 
 def _history_short_label(condition: str) -> str:
@@ -4875,6 +6545,7 @@ def plot_positive_minus_negative_accuracy_transition_figures(
     view_colors: dict[str, str] | None = None,
     fit_post_transition: bool = True,
     fit_pre_transition_baseline: bool = True,
+    include_duration_rows: bool = True,
     show: bool = True,
 ) -> dict[str, Any]:
     """Plot the directional half-difference of pooled positive-minus-negative accuracy."""
@@ -4994,28 +6665,21 @@ def plot_positive_minus_negative_accuracy_transition_figures(
 
     fig, axes = plt.subplots(
         1,
-        len(plot_abls),
-        figsize=(5.2 * len(plot_abls), 5.8),
+        len(plot_abls) + 1,
+        figsize=(5.2 * len(plot_abls) + 4.8, 5.8),
         squeeze=False,
-        sharey=True,
+        sharey=False,
+        gridspec_kw={"width_ratios": [1.0] * len(plot_abls) + [1.15]},
     )
     axes = axes.ravel()
 
-    all_summary_values = []
-    for animal_trace in combined_payloads.values():
-        vals = pd.to_numeric(animal_trace["transition_half_difference"], errors="coerce")
-        vals = vals[np.isfinite(vals)]
-        if len(vals):
-            all_summary_values.append(vals.to_numpy(dtype=float))
-    if all_summary_values:
-        all_summary = np.concatenate(all_summary_values)
-        ymax = np.nanpercentile(np.abs(all_summary), 95)
-        ymax = max(0.15, float(ymax))
-        ymax = min(ymax, 1.0)
-    else:
-        ymax = 0.25
+    y_lim = _transition_value_ylim(combined_payloads.values(), "transition_half_difference")
 
-    for ax, abl in zip(axes, plot_abls):
+    main_axes = axes[:len(plot_abls)]
+    parameter_ax = axes[len(plot_abls)]
+    side_fit_parameter_rows: list[tuple[str, np.ndarray, np.ndarray]] = []
+
+    for ax, abl in zip(main_axes, plot_abls):
         fit_parameter_rows: list[tuple[str, np.ndarray, np.ndarray]] = []
         for i, view in enumerate(views):
             animal_trace = combined_payloads.get(view.name)
@@ -5055,20 +6719,31 @@ def plot_positive_minus_negative_accuracy_transition_figures(
                     ax.plot(x_curve, y_curve, color=color, linewidth=2.0)
                     fit_parameter_rows.append((view.name, parameter_mean, parameter_sem))
 
-        if fit_post_transition:
-            _add_fit_parameter_inset(ax, fit_parameter_rows, label_header="genotype", fontsize=fs)
+        if fit_post_transition and abl == plot_abls[-1]:
+            side_fit_parameter_rows = fit_parameter_rows
 
         ax.axvline(0, color="0.45", linestyle="--", linewidth=1.1)
         ax.axhline(0.0, color="0.6", linestyle=":", linewidth=1.0)
         ax.set_title(f"ABL {abl}" if separate_abls else "All ABLs", fontsize=fs, pad=8)
         ax.set_xlabel("Trials from block transition", fontsize=fs)
-        ax.set_ylim(-0.25, ymax)
+        ax.set_ylim(*y_lim)
         ax.set_xlim(-pre_window - 1, post_window + 1)
         ax.set_xticks([-10, 0, 10, 20, 30])
         ax.set_xticklabels(["-10", "0", "10", "20", "30"])
         ax.tick_params(axis="both", labelsize=fs)
         for spine in ["right", "top"]:
             ax.spines[spine].set_visible(False)
+
+    if fit_post_transition:
+        _draw_fit_parameter_axis(
+            parameter_ax,
+            side_fit_parameter_rows,
+            label_header="genotype",
+            fontsize=fs,
+            compact=False,
+        )
+    else:
+        parameter_ax.axis("off")
 
     handles = [
         Line2D([], [], color=view_colors.get(view.name, f"C{i % 10}"), marker="o", linestyle="-", label=view.name)
@@ -5095,7 +6770,7 @@ def plot_positive_minus_negative_accuracy_transition_figures(
     fig.tight_layout(rect=[0.04, 0.10, 1, 0.95])
     if show:
         plt.show()
-    return {
+    outputs = {
         "figure": fig,
         "transition_bin_size": transition_bin_size,
         "pre_window": pre_window,
@@ -5105,6 +6780,190 @@ def plot_positive_minus_negative_accuracy_transition_figures(
         "combined_payloads": combined_payloads,
         "individual_fit_payloads": individual_fit_payloads,
         "coverage": pd.DataFrame(coverage_rows),
+    }
+    if include_duration_rows:
+        duration_rows = _plot_positive_minus_negative_accuracy_duration_rows(
+            bundle=bundle,
+            views=views,
+            window=window,
+            pre_window=pre_window,
+            post_window=post_window,
+            abls=abls,
+            separate_abls=separate_abls,
+            transition_bin_size=transition_bin_size,
+            view_colors=view_colors,
+            fit_post_transition=fit_post_transition,
+            fit_pre_transition_baseline=fit_pre_transition_baseline,
+            show=show,
+        )
+        if duration_rows is not None:
+            outputs["duration_rows"] = duration_rows
+    return outputs
+
+
+def _plot_positive_minus_negative_accuracy_duration_rows(
+    *,
+    bundle: dict[str, Any],
+    views: list[ViewSpec],
+    window: int,
+    pre_window: int,
+    post_window: int,
+    abls: tuple[int, ...],
+    separate_abls: bool,
+    transition_bin_size: int | None,
+    view_colors: dict[str, str],
+    fit_post_transition: bool,
+    fit_pre_transition_baseline: bool,
+    show: bool,
+) -> dict[str, Any] | None:
+    df_blocks = bundle["df_blocks"]
+    duration_col = _duration_column(df_blocks)
+    duration_values = sorted(pd.Series(df_blocks[duration_col]).dropna().unique(), key=_duration_sort_key)
+    if not duration_values:
+        return None
+
+    plot_abls = abls if separate_abls else (0,)
+    duration_payloads: dict[Any, dict[str, pd.DataFrame]] = {}
+    duration_fit_payloads: dict[Any, dict[str, pd.DataFrame]] = {}
+    duration_results: dict[Any, dict[str, Any]] = {}
+
+    for duration in duration_values:
+        analysis_df = df_blocks[pd.Series(df_blocks[duration_col]).eq(duration)].copy()
+        if analysis_df.empty:
+            continue
+        duration_bundle = {**bundle, "df_blocks": analysis_df}
+        result = plot_positive_minus_negative_accuracy_transition_figures(
+            duration_bundle,
+            views=views,
+            window=window,
+            pre_window=pre_window,
+            post_window=post_window,
+            abls=abls,
+            separate_abls=separate_abls,
+            transition_bin_size=transition_bin_size,
+            view_colors=view_colors,
+            fit_post_transition=fit_post_transition,
+            fit_pre_transition_baseline=fit_pre_transition_baseline,
+            include_duration_rows=False,
+            show=False,
+        )
+        if not result:
+            continue
+        if result.get("figure") is not None:
+            plt.close(result["figure"])
+            result = {key: value for key, value in result.items() if key != "figure"}
+        combined = result.get("combined_payloads", {})
+        if combined:
+            duration_payloads[duration] = combined
+            duration_fit_payloads[duration] = result.get("individual_fit_payloads", {})
+            duration_results[duration] = result
+
+    if not duration_payloads:
+        return None
+
+    style = bundle["style"]
+    fs = style.legend_fs
+    fig, axes = plt.subplots(
+        len(duration_payloads),
+        len(plot_abls) + 1,
+        figsize=(5.2 * len(plot_abls) + 4.8, max(3.8 * len(duration_payloads), 3.8)),
+        squeeze=False,
+        sharex=False,
+        sharey=False,
+        gridspec_kw={"width_ratios": [1.0] * len(plot_abls) + [1.15]},
+    )
+    all_transition_payloads = [
+        payload
+        for combined in duration_payloads.values()
+        for payload in combined.values()
+    ]
+    y_lim = _transition_value_ylim(all_transition_payloads, "transition_half_difference")
+
+    for row, (duration, combined) in enumerate(duration_payloads.items()):
+        duration_label = _format_stim_duration_title(duration)
+        row_fit_parameter_rows: list[tuple[str, np.ndarray, np.ndarray]] = []
+        for col, abl in enumerate(plot_abls):
+            ax = axes[row, col]
+            fit_parameter_rows: list[tuple[str, np.ndarray, np.ndarray]] = []
+            for i, view in enumerate(views):
+                animal_trace = combined.get(view.name)
+                if animal_trace is None or animal_trace.empty:
+                    continue
+                sub = animal_trace[pd.to_numeric(animal_trace["ABL"], errors="coerce").eq(abl)].copy()
+                if sub.empty:
+                    continue
+                x = pd.to_numeric(sub["relative_trial"], errors="coerce").to_numpy(dtype=float)
+                y = pd.to_numeric(sub["transition_half_difference"], errors="coerce").to_numpy(dtype=float)
+                yerr = pd.to_numeric(sub["sem"], errors="coerce").to_numpy(dtype=float)
+                color = view_colors.get(view.name, f"C{i % 10}")
+                ax.plot(x, y, color=color, marker="o", linestyle="None", markersize=4.0, label=view.name)
+                finite = np.isfinite(x) & np.isfinite(y) & np.isfinite(yerr)
+                if finite.any():
+                    ax.errorbar(x[finite], y[finite], yerr=yerr[finite], fmt="none", color=color, alpha=0.55, capsize=2)
+                if fit_post_transition:
+                    individual_fits = duration_fit_payloads.get(duration, {}).get(view.name, pd.DataFrame())
+                    if "ABL" in individual_fits:
+                        individual_fits = individual_fits[pd.to_numeric(individual_fits["ABL"], errors="coerce").eq(abl)].copy()
+                    fitted = _mean_individual_fit_curve(individual_fits, post_window=post_window)
+                    if fitted is not None:
+                        x_curve, y_curve, _, parameter_mean, parameter_sem = fitted
+                        ax.plot(x_curve, y_curve, color=color, linewidth=2.0)
+                        fit_parameter_rows.append((view.name, parameter_mean, parameter_sem))
+
+            if fit_post_transition and col == len(plot_abls) - 1:
+                row_fit_parameter_rows = fit_parameter_rows
+            ax.axvline(0, color="0.45", linestyle="--", linewidth=1.1)
+            ax.axhline(0.0, color="0.6", linestyle=":", linewidth=1.0)
+            if row == 0:
+                ax.set_title(f"ABL {abl}" if separate_abls else "All ABLs", fontsize=fs, pad=8)
+            if col == 0:
+                ax.set_ylabel(f"{duration_label}\nHalf Transition Difference", fontsize=fs)
+            ax.set_xlabel("Trials from block transition", fontsize=fs)
+            ax.set_ylim(*y_lim)
+            ax.set_xlim(-pre_window - 1, post_window + 1)
+            ax.set_xticks([-10, 0, 10, 20, 30])
+            ax.set_xticklabels(["-10", "0", "10", "20", "30"])
+            ax.tick_params(axis="both", labelsize=fs)
+            for spine in ["right", "top"]:
+                ax.spines[spine].set_visible(False)
+
+        parameter_ax = axes[row, len(plot_abls)]
+        if fit_post_transition:
+            _draw_fit_parameter_axis(
+                parameter_ax,
+                row_fit_parameter_rows,
+                label_header="genotype",
+                fontsize=fs,
+                compact=False,
+            )
+        else:
+            parameter_ax.axis("off")
+
+    handles = [
+        Line2D([], [], color=view_colors.get(view.name, f"C{i % 10}"), marker="o", linestyle="-", label=view.name)
+        for i, view in enumerate(views)
+        if any(view.name in combined for combined in duration_payloads.values())
+    ]
+    labels = [handle.get_label() for handle in handles]
+    fig.legend(
+        handles=handles,
+        labels=labels,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.012),
+        ncol=max(1, min(4, len(labels))),
+        fontsize=fs,
+        frameon=False,
+    )
+    fig.suptitle("Genotype summary by stim duration", fontsize=fs, y=0.995)
+    fig.tight_layout(rect=[0.04, 0.08, 1, 0.96])
+    if show:
+        plt.show()
+    return {
+        "figure": fig,
+        "duration_payloads": duration_payloads,
+        "duration_results": duration_results,
+        "durations": list(duration_payloads.keys()),
+        "abls": plot_abls,
     }
 
 
@@ -5746,6 +7605,8 @@ def plot_biased_blocks(
 
     if layout in {"genotype_blocks", "by_genotype", "views"}:
         figures["genotype_blocks"] = plot_genotype_block_figures(bundle, views=views, show=show)
+    elif layout in {"genotype_duration_rows", "duration_rows", "stim_duration_rows"}:
+        figures["genotype_duration_rows"] = plot_genotype_duration_row_figures(bundle, views=views, show=show)
     elif layout in {"animal_blocks", "by_animal", "animals"}:
         figures["animal_blocks"] = plot_animal_block_figures(bundle, max_animals=max_animals, show=show)
     elif layout in {"block_conditions", "by_block_condition", "conditions"}:
@@ -5761,6 +7622,7 @@ def plot_biased_blocks(
         figures["block_condition_params"] = plot_block_condition_psy_params(
             bundle,
             views=views,
+            view_colors=view_colors,
             block_conditions=block_conditions,
             show=show,
         )
@@ -5817,7 +7679,7 @@ def plot_biased_blocks(
         "biased_transition_accuracy_delta",
         "positive_minus_negative_accuracy_transition",
     }:
-        figures["biased_transition_accuracy_delta"] = plot_positive_minus_negative_accuracy_transition_figures(
+        accuracy_delta = plot_positive_minus_negative_accuracy_transition_figures(
             bundle,
             views=views,
             transition_bin_size=transition_bin_size,
@@ -5825,6 +7687,23 @@ def plot_biased_blocks(
             view_colors=view_colors,
             fit_post_transition=fit_post_transition,
             fit_pre_transition_baseline=fit_pre_transition_baseline,
+            show=show,
+        )
+        figures["biased_transition_accuracy_delta"] = accuracy_delta
+    elif layout in {"session23_accuracy_delta", "session_23_accuracy_delta", "level23_accuracy_delta"}:
+        figures["session23_accuracy_delta"] = plot_session23_accuracy_delta_figures(
+            bundle,
+            views=views,
+            separate_abls=separate_abls,
+            view_colors=view_colors,
+            show=show,
+        )
+    elif layout in {"session23_rt_delta", "session_23_rt_delta", "level23_rt_delta"}:
+        figures["session23_rt_delta"] = plot_session23_rt_delta_figures(
+            bundle,
+            views=views,
+            separate_abls=separate_abls,
+            view_colors=view_colors,
             show=show,
         )
     elif layout in {"biased_transition_rt", "transition_rt", "half_transition_rt"}:
@@ -5858,6 +7737,7 @@ def plot_biased_blocks(
         )
     elif layout == "all":
         figures["genotype_blocks"] = plot_genotype_block_figures(bundle, views=views, show=show)
+        figures["genotype_duration_rows"] = plot_genotype_duration_row_figures(bundle, views=views, show=show)
         figures["animal_blocks"] = plot_animal_block_figures(bundle, max_animals=max_animals, show=show)
         figures["block_conditions"] = plot_block_condition_figures(
             bundle,
@@ -5870,6 +7750,7 @@ def plot_biased_blocks(
         figures["block_condition_params"] = plot_block_condition_psy_params(
             bundle,
             views=views,
+            view_colors=view_colors,
             block_conditions=block_conditions,
             show=show,
         )
@@ -5915,7 +7796,7 @@ def plot_biased_blocks(
             transition_bin_size=transition_bin_size,
             show=show,
         )
-        figures["biased_transition_accuracy_delta"] = plot_positive_minus_negative_accuracy_transition_figures(
+        accuracy_delta = plot_positive_minus_negative_accuracy_transition_figures(
             bundle,
             views=views,
             transition_bin_size=transition_bin_size,
@@ -5925,11 +7806,29 @@ def plot_biased_blocks(
             fit_pre_transition_baseline=fit_pre_transition_baseline,
             show=show,
         )
+        figures["biased_transition_accuracy_delta"] = accuracy_delta
+        figures["session23_accuracy_delta"] = plot_session23_accuracy_delta_figures(
+            bundle,
+            views=views,
+            separate_abls=separate_abls,
+            view_colors=view_colors,
+            show=show,
+        )
+        figures["session23_rt_delta"] = plot_session23_rt_delta_figures(
+            bundle,
+            views=views,
+            separate_abls=separate_abls,
+            view_colors=view_colors,
+            show=show,
+        )
     else:
         raise ValueError(
-            "layout must be one of: genotype_blocks, block_conditions, block_condition_params, block_condition_summary, block_bias, left_to_right_transition, left_to_right_transition_genotypes, biased_transition_aligned, biased_transition_collapsed, biased_transition_baseline, biased_transition_accuracy_delta, biased_transition_rt, biased_transition_accuracy_delta_durations, biased_transition_fit_parameter_summary, animal_blocks, all."
+            "layout must be one of: genotype_blocks, genotype_duration_rows, block_conditions, block_condition_params, block_condition_summary, block_bias, left_to_right_transition, left_to_right_transition_genotypes, biased_transition_aligned, biased_transition_collapsed, biased_transition_baseline, biased_transition_accuracy_delta, session23_accuracy_delta, session23_rt_delta, biased_transition_rt, biased_transition_accuracy_delta_durations, biased_transition_fit_parameter_summary, animal_blocks, all."
         )
 
+    _apply_sparse_ild_ticks_to_figures(figures)
+    _apply_data_y_limits_to_figures(figures)
+    _apply_font_size_to_figures(figures, font_size=16)
     return {"figures": figures}
 
 
@@ -5952,6 +7851,8 @@ def save_biased_block_figures(
     def _save(obj: dict[str, Any], folder: Path, name_prefix: str) -> None:
         for name, value in obj.items():
             if isinstance(value, dict) and "figure" in value:
+                if value["figure"] is None:
+                    continue
                 for fmt in formats:
                     value["figure"].savefig(
                         folder / f"{name_prefix}_{_safe_name(name)}.{fmt}",

@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 
 from Juananalysis.kernel_regression import build_hierarchical_data_full
 
-DEFAULT_OUTPUT = ROOT / "DataFiles" / "Old Data" / "ILD_task" / "cntnap2_wt_cohort2_cohort4_kernel_timing_overlay.pkl"
+DEFAULT_OUTPUT = ROOT / "DataFiles" / "Old Data" / "ILD_task" / "cntnap2_wt_cohort2_cohort4_abl20_kernel_timing_overlay.pkl"
 
 
 def epanechnikov_kernel(z: np.ndarray) -> np.ndarray:
@@ -30,7 +30,7 @@ def load_meta(data_dir: Path, cohort: str) -> pd.DataFrame:
     return meta[["animal", "cohort", "sex", "genotype"]]
 
 
-def load_filtered_trials(base_dir: Path, cohorts: list[str]) -> tuple[pd.DataFrame, dict]:
+def load_filtered_trials(base_dir: Path, cohorts: list[str], abl_filter: float | None) -> tuple[pd.DataFrame, dict]:
     frames = []
     used_csvs = {}
 
@@ -69,6 +69,8 @@ def load_filtered_trials(base_dir: Path, cohorts: list[str]) -> tuple[pd.DataFra
             & df["short_duration_num"].eq(0)
             & df["RT"].notna()
         )
+        if abl_filter is not None:
+            keep &= np.isclose(df["ABL"], float(abl_filter), equal_nan=False)
         frames.append(df.loc[keep].copy())
 
     filtered = pd.concat(frames, ignore_index=True, sort=False)
@@ -257,8 +259,9 @@ def make_overlay(
     bandwidth: float,
     bootstraps: int,
     seed: int,
+    abl_filter: float | None,
 ) -> dict:
-    trials, used_csvs = load_filtered_trials(base_dir, cohorts)
+    trials, used_csvs = load_filtered_trials(base_dir, cohorts, abl_filter)
     x_grid = np.linspace(x_min, x_max, n_grid)
 
     trials = trials.copy()
@@ -321,10 +324,10 @@ def make_overlay(
 
     return {
         "kind": "kernel_timing_overlay",
-        "name": "CNTNAP2 WT cohorts 2+4 kernel timing overlay",
+        "name": "CNTNAP2 WT cohorts 2+4 ABL 20 kernel timing overlay",
         "description": (
             "Notebook-04-style kernel timing overlay for WT CNTNAP2 cohorts 2 and 4. "
-            "Filters: session_type in {1, 2}, short_duration == 0. "
+            f"Filters: session_type in {{1, 2}}, short_duration == 0, ABL == {abl_filter}. "
             "Tachometric uses valid correct/error trials with finite RT and MT. "
             "RTD uses all filtered trials with finite timed_rt."
         ),
@@ -349,6 +352,7 @@ def make_overlay(
             "genotype": "wt",
             "session_type": [1, 2],
             "short_duration": 0,
+            "ABL": abl_filter,
             "rt_column": "timed_rt",
             "tcm_success_filter": [-1, 1],
             "rtd_success_filter": None,
@@ -386,7 +390,10 @@ def main() -> None:
     parser.add_argument("--bandwidth", type=float, default=0.015)
     parser.add_argument("--bootstraps", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=12345)
+    parser.add_argument("--abl-filter", type=float, default=20.0, help="ABL value to include. Use --abl-filter nan to disable is not supported; edit script or pass --abl-filter-off.")
+    parser.add_argument("--abl-filter-off", action="store_true", help="Disable ABL filtering.")
     args = parser.parse_args()
+    abl_filter = None if args.abl_filter_off else args.abl_filter
 
     overlay = make_overlay(
         base_dir=args.base_dir,
@@ -397,6 +404,7 @@ def main() -> None:
         bandwidth=args.bandwidth,
         bootstraps=args.bootstraps,
         seed=args.seed,
+        abl_filter=abl_filter,
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

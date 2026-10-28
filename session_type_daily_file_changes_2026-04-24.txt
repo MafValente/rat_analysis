@@ -117,3 +117,38 @@ SHANK3 cohort1 daily CSVs changed
 - DataFiles/SHANK3_cohort1/ASD0045/out_ASD0045_260425.csv
 - DataFiles/SHANK3_cohort1/ASD0045/out_ASD0045_260427.csv
 - DataFiles/SHANK3_cohort1/ASD0045/out_ASD0045_260428.csv
+
+Changes applied on 2026-10-09 for ASD0073 files with short durations but session_type 1
+
+SHANK3 cohort2 daily CSVs changed
+- DataFiles/SHANK3_cohort2/ASD0073/out_ASD0073_260925.csv (raw session 37; 331 rows)
+- DataFiles/SHANK3_cohort2/ASD0073/out_ASD0073_260928.csv (raw session 38; 277 rows)
+- DataFiles/SHANK3_cohort2/ASD0073/out_ASD0073_260929.csv (raw session 39; 408 rows)
+- DataFiles/SHANK3_cohort2/ASD0073/out_ASD0073_260930.csv (raw session 40; 349 rows)
+- DataFiles/SHANK3_cohort2/ASD0073/out_ASD0073_261001.csv (raw session 41; 411 rows)
+- DataFiles/SHANK3_cohort2/ASD0073/out_ASD0073_261002.csv (raw session 42; 352 rows)
+- DataFiles/SHANK3_cohort2/ASD0073/out_ASD0073_261006.csv (raw session 43; 198 rows)
+
+Notes
+- Changed session_type from 1 to 2 for all 2,326 trials in these seven daily files.
+- Each file contains short_duration values 0, 8, 16, 32, and 64. Files containing only 0 were unchanged.
+- Also updated the matching rows in DataFiles/SHANK3_cohort2/merged_ASD0073.csv (merged sessions 38-44; raw sessions 37-43).
+- In the merged CSV, refreshed stim_dur and stim_dur_label from recorded short_duration; 0 is represented as 6000 / RT.
+- All other field values and row counts were verified unchanged.
+- Original CSV backups and changes.json: outputs/data_corrections/ASD0073_session_type_20261009_124216/
+
+SHANK3 cohort2 follow-up check on 2026-10-09
+- Checked the other animals: ASD0072, ASD0074, ASD0075, ASD0076, and ASD0077.
+- Scanned 219 daily CSVs and all five corresponding merged CSVs.
+- No additional session_type 1 mismatches with short_duration or stim_dur values 8, 16, 32, or 64 were found. Also checked for any positive duration below 6000; no additional mismatches were found.
+- ASD0075 has seven daily files with positive short durations; none are mislabeled as session_type 1.
+- Sessions containing only short_duration 0 were not treated as short-duration sessions.
+- No further data files required changes.
+
+Merged-file corrections applied on 2026-10-24 for sessions containing nonzero short_duration values but labelled session_type 1
+
+- DataFiles/CNTNAP2_cohort3/merged_ASD0026.csv — animal ASD0026, session 41; 588 rows changed from session_type 1 to 2 (354 rows had short_duration 8/16/32/64).
+- DataFiles/SHANK3_cohort2/merged_ASD0073.csv — animal ASD0073, session 45; 315 rows changed from session_type 1 to 2 (182 rows had short_duration 8/16/32/64).
+- DataFiles/SHANK3_cohort1/merged_ASD0045.csv — animal ASD0045, session 41; 765 rows changed from session_type 1 to 2 (482 rows had short_duration 8/16/32/64).
+
+The complete affected sessions were changed so their RT rows (short_duration 0) and short-duration rows share session_type 2. All other fields and row counts were preserved.

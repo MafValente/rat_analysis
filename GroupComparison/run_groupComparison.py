@@ -37,7 +37,7 @@ LINE = "CNTNAP2"
 COHORT_SELECTION = "cohort3"   # "all", "cohort2", or ["cohort2", "cohort3"]
 DATASET_SELECTIONS = None  # e.g. [("CNTNAP2", "cohort3"), ("SHANK3", "cohort1")]
 BASE_DATA_DIR = os.path.join(ROOT, "DataFiles")
-COHORT_SESSION_MIN = {"cohort2": 13}
+COHORT_SESSION_MIN = {"CNTNAP2:cohort2": 13}
 SESSION_EQUALIZATION_EXCLUDE = {"cohort3": {"ASD0022"}}
 MAKE_VIEWS_FIG = True
 MAKE_ABLS_FIG = True
@@ -287,7 +287,7 @@ def plot_views_overlay(prepared, group_jnd_by_view, genotypes, cohorts, cfg, sty
 
         style_axes(ax_rt, style, _title_with_single_cohort(f"{genotype} - RT", cohorts), "ILD (dB)", "Mean RT (s)")
         style_axes(ax_mt, style, _title_with_single_cohort(f"{genotype} - MT", cohorts), "ILD (dB)", "Mean MT (s)")
-        style_axes(ax_psy, style, _title_with_single_cohort(f"{genotype} - Psychometric", cohorts), "ILD (dB)", "P(Left)")
+        style_axes(ax_psy, style, _title_with_single_cohort(f"{genotype} - Psychometric", cohorts), "ILD (dB)", "P(Right)")
         ax_rt.set_xlim(*cfg.xlim_abs)
         ax_mt.set_xlim(*cfg.xlim_sym)
         ax_psy.set_xlim(*cfg.xlim_sym)
@@ -352,7 +352,7 @@ def plot_abls_overlay(prepared, group_jnd_by_view, genotypes, cohorts, cfg, styl
 
         style_axes(ax_rt, style, _title_with_single_cohort(f"ABL {abl} - RT", cohorts), "ILD (dB)", "Mean RT (s)")
         style_axes(ax_mt, style, _title_with_single_cohort(f"ABL {abl} - MT", cohorts), "ILD (dB)", "Mean MT (s)")
-        style_axes(ax_psy, style, _title_with_single_cohort(f"ABL {abl} - Psychometric", cohorts), "ILD (dB)", "P(Left)")
+        style_axes(ax_psy, style, _title_with_single_cohort(f"ABL {abl} - Psychometric", cohorts), "ILD (dB)", "P(Right)")
         ax_rt.set_xlim(*cfg.xlim_abs)
         ax_mt.set_xlim(*cfg.xlim_sym)
         ax_psy.set_xlim(*cfg.xlim_sym)

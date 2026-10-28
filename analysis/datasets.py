@@ -241,3 +241,22 @@ def load_dataset_selections(
         "missing_meta_dataset_keys": missing_meta_keys,
     }
     return df_all, meta_all, info
+
+
+def apply_session_min(df, session_min, datasets=None):
+    """Apply a session cutoff globally, or only to specified (line, cohort) pairs."""
+    if session_min is None or session_min <= 0 or "session" not in df.columns:
+        return df.copy()
+    sessions = pd.to_numeric(df["session"], errors="coerce")
+    if datasets is None:
+        return df.loc[sessions.ge(session_min)].copy()
+    matches = pd.Series(False, index=df.index)
+    for line, cohort in datasets:
+        if {"line", "cohort"}.issubset(df.columns):
+            matches |= (df["line"].astype("string").str.strip().eq(line)
+                        & df["cohort"].astype("string").str.strip().eq(cohort)).fillna(False)
+        elif "dataset_key" in df.columns:
+            matches |= df["dataset_key"].astype("string").str.strip().eq(f"{line}:{cohort}").fillna(False)
+        else:
+            raise KeyError("Dataset-specific session filtering requires line/cohort or dataset_key.")
+    return df.loc[~matches | sessions.ge(session_min)].copy()

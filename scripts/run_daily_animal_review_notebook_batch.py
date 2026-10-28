@@ -12,11 +12,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+os.environ.setdefault("MPLCONFIGDIR", str(ROOT / ".matplotlib"))
+
 os.environ.setdefault("JUPYTER_CONFIG_DIR", str(ROOT / ".jupyter"))
 os.environ.setdefault("JUPYTER_DATA_DIR", str(ROOT / ".jupyter_data"))
 os.environ.setdefault("JUPYTER_RUNTIME_DIR", str(ROOT / ".jupyter_runtime"))
 
 from analysis.daily_merge import get_animals_for_cohort, get_base_dir
+from Pipeline.daily_review_report import save_cohort_report
 
 
 DEFAULT_NOTEBOOK = ROOT / "notebooks" / "ASD" / "02_daily_animal_review.ipynb"
@@ -76,7 +79,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "For each animal, use its highest numeric training_level and analyze "
-            "all sessions at that level."
+            "all sessions at that level. This is also the default when no training-level filters are supplied."
         ),
     )
     parser.add_argument(
@@ -154,12 +157,18 @@ def main() -> int:
             "--training-level-min, or --training-level-max."
         )
 
+    use_latest_training_level = args.latest_training_level or all(
+        value is None
+        for value in (args.training_level, args.training_level_min, args.training_level_max)
+    )
+
+    report_pages = []
     total = 0
     for animal in animals:
         subject_id = animal
         training_level = (
             latest_training_level_for_animal(args.line, args.cohort, subject_id)
-            if args.latest_training_level
+            if use_latest_training_level
             else args.training_level
         )
         figure_dir = (args.out_dir / args.line / args.cohort / subject_id).resolve()
@@ -183,7 +192,7 @@ def main() -> int:
             "TRAINING_LEVEL": training_level,
             "TRAINING_LEVEL_MIN": args.training_level_min,
             "TRAINING_LEVEL_MAX": args.training_level_max,
-            "USE_LATEST_TRAINING_LEVEL": args.latest_training_level,
+            "USE_LATEST_TRAINING_LEVEL": use_latest_training_level,
             "ABL_FILTER": args.abl_filter[0] if args.abl_filter and len(args.abl_filter) == 1 else args.abl_filter,
             "SOUND_RAMP_FILTER": (
                 args.sound_ramp_filter[0]
@@ -213,6 +222,10 @@ def main() -> int:
                 "SOUND_RAMP_EXCLUDE": parameters["SOUND_RAMP_EXCLUDE"],
             },
         )
+        previous_figures = {
+            path: (path.stat().st_mtime_ns, path.stat().st_size)
+            for path in figure_dir.glob("*.png")
+        }
         pm.execute_notebook(
             input_path=str(notebook_path),
             output_path=str(output_notebook),
@@ -223,7 +236,11 @@ def main() -> int:
             progress_bar=False,
         )
         print(f"  figures: {figure_dir}")
-        figure_files = sorted(figure_dir.glob("*.png"))
+        figure_files = [
+            path for path in sorted(figure_dir.glob("*.png"))
+            if previous_figures.get(path) != (path.stat().st_mtime_ns, path.stat().st_size)
+        ]
+        report_pages.append((subject_id, figure_files))
         if not figure_files:
             print(f"  WARNING: no PNG figures were saved to {figure_dir}")
         if not args.no_save_executed:
@@ -232,6 +249,11 @@ def main() -> int:
             temp_output_path.unlink()
         total += 1
 
+    report_path = save_cohort_report(
+        args.out_dir / args.line / args.cohort / "daily_animal_review.pdf",
+        report_pages, line=args.line, cohort=args.cohort,
+    )
+    print(f"PDF report: {report_path}")
     print(f"Completed {total} animal(s).")
     return 0
 
