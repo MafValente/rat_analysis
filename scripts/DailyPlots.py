@@ -537,7 +537,8 @@ for abl in sorted(agg_points["ABL"].unique()):
     PropLeft_mean = sub["mean"].values
     n_trials = np.full_like(ILDs, 50, dtype=float)
     pars, L, xx, yy = Psychometric.fit_and_plot_psychometric(
-        ILDs, PropLeft_mean, model="my_psycho", n_trials=n_trials, show_plot=False
+        ILDs, PropLeft_mean, model="my_psycho", n_trials=n_trials, show_plot=False,
+        fit_method="least_squares",
     )
     xx = np.linspace(min(ILDs), max(ILDs), 200)
     group_fits[abl] = {

@@ -1,9 +1,9 @@
 # Notebooks
 
-This branch is the stable ASD-facing notebook set. Shared analysis code stays at the repo root.
+- `ASD/`: ASD workflows for daily merging, animal review, group comparison, stimulus duration, biased blocks, learning curves, trial selection, and GLM analysis.
+- `Stakes/`: Stakes workflows for daily merging, animal review, group analysis, kernel timing, and trial selection.
+- `legacy/`: historical notebooks retained for reference.
 
-- `ASD/`: stable ASD workflows kept on `main`.
+Keep configuration, execution, and display in notebooks; put reusable analysis logic in the Python modules listed in [PROJECT_INDEX.md](../PROJECT_INDEX.md).
 
-Experimental ASD notebooks and the separate Stakes workflow can live on development branches or in a separate Stakes repository.
-
-Each notebook finds the repo root automatically whether you launch it from the repo root or from `notebooks/ASD`.
+The Stakes kernel timing notebook imports `basic_ramp.py` from the repository root.

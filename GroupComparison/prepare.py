@@ -5,6 +5,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 from analysis.datasets import apply_session_min
+from analysis.uncertainty import summarize_animal_mean_ci
 
 from .config import ViewSpec, FilterConfig, GroupComparisonConfig
 
@@ -91,34 +92,38 @@ def apply_filters(df: pd.DataFrame, fcfg: FilterConfig) -> pd.DataFrame:
 def prep_rt(df_in: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     df_s = df_in[df_in["success"] == 1].copy()
     df_s["abs_ILD"] = df_s["ILD"].abs()
+    if "dataset_key" not in df_s.columns:
+        df_s["dataset_key"] = "single_cohort"
 
     per_subj = (
-        df_s.groupby(["animal", "ABL", "abs_ILD"])["timed_rt"]
+        df_s.groupby(["dataset_key", "animal", "ABL", "abs_ILD"], dropna=False)["timed_rt"]
         .agg(mean_rt="mean")
         .reset_index()
         .rename(columns={"abs_ILD": "ILD"})
     )
 
-    grouped = (
-        per_subj.groupby(["ABL", "ILD"])
-        .agg(mean=("mean_rt", "mean"), sem=("mean_rt", sem), n=("mean_rt", "count"))
-        .reset_index()
+    grouped = summarize_animal_mean_ci(
+        per_subj,
+        value_col="mean_rt",
+        group_cols=["ABL", "ILD"],
     )
     return per_subj, grouped
 
 
 def prep_mt(df_in: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    completed = df_in[df_in["success"] == 1].copy()
+    if "dataset_key" not in completed.columns:
+        completed["dataset_key"] = "single_cohort"
     per_subj = (
-        df_in[df_in["success"] == 1]
-        .groupby(["animal", "ABL", "ILD"])["timed_mt"]
+        completed.groupby(["dataset_key", "animal", "ABL", "ILD"], dropna=False)["timed_mt"]
         .agg(mean_mt="mean")
         .reset_index()
     )
 
-    grouped = (
-        per_subj.groupby(["ABL", "ILD"])
-        .agg(mean=("mean_mt", "mean"), sem=("mean_mt", sem), n=("mean_mt", "count"))
-        .reset_index()
+    grouped = summarize_animal_mean_ci(
+        per_subj,
+        value_col="mean_mt",
+        group_cols=["ABL", "ILD"],
     )
     return per_subj, grouped
 
@@ -145,7 +150,17 @@ def prep_psy(
     if aggregation not in valid_aggregations:
         raise ValueError(f"aggregation must be one of {sorted(valid_aggregations)}")
 
-    for subject, df_subj in df_in.groupby("animal", sort=False):
+    subject_group_cols = ["dataset_key", "animal"] if "dataset_key" in df_in.columns else ["animal"]
+    for subject_key, df_subj in df_in.groupby(subject_group_cols, sort=False, dropna=False):
+        subject = subject_key[-1] if isinstance(subject_key, tuple) else subject_key
+        dataset_key = (
+            df_subj["dataset_key"].iloc[0]
+            if "dataset_key" in df_subj.columns and not df_subj.empty else "single_cohort"
+        )
+        cohort = (
+            df_subj["cohort"].iloc[0]
+            if "cohort" in df_subj.columns and not df_subj.empty else pd.NA
+        )
         if aggregation == "session_then_animal" and "session" in df_subj.columns:
             session_rows: List[dict] = []
             for _, df_sess in df_subj.groupby("session", sort=False):
@@ -194,7 +209,8 @@ def prep_psy(
                 if len(ILDs) >= 4 and np.isfinite(mean_vals).all():
                     try:
                         pars, L, xx, yy = Psychometric.fit_and_plot_psychometric(
-                            ILDs, mean_vals, model="my_psycho", n_trials=n_trials, show_plot=False
+                            ILDs, mean_vals, model="my_psycho", n_trials=n_trials, show_plot=False,
+                            fit_method="least_squares",
                         )
                     except Exception:
                         pars = None
@@ -227,7 +243,13 @@ def prep_psy(
         if jnd_df is not None and not jnd_df.empty:
             for _, r in jnd_df.iterrows():
                 jnd_rows.append(
-                    {"subject": subject, "ABL": int(r["ABL"]), "JND": float(r["JND"])}
+                    {
+                        "subject": subject,
+                        "dataset_key": dataset_key,
+                        "cohort": cohort,
+                        "ABL": int(r["ABL"]),
+                        "JND": float(r["JND"]),
+                    }
                 )
 
         # ---- points + optional individual fits ----
@@ -236,6 +258,8 @@ def prep_psy(
                 all_pts.append(
                     {
                         "subject": subject,
+                        "dataset_key": dataset_key,
+                        "cohort": cohort,
                         "ABL": int(row["ABL"]),
                         "ILD": float(row["ILD"]),
                         "PropLeft": float(row["mean"]),
@@ -248,7 +272,16 @@ def prep_psy(
                 pleft = np.asarray(res["PropLeft"], dtype=float)
 
                 for ild, val in zip(ILDs, pleft):
-                    all_pts.append({"subject": subject, "ABL": abl_i, "ILD": float(ild), "PropLeft": float(val)})
+                    all_pts.append(
+                        {
+                            "subject": subject,
+                            "dataset_key": dataset_key,
+                            "cohort": cohort,
+                            "ABL": abl_i,
+                            "ILD": float(ild),
+                            "PropLeft": float(val),
+                        }
+                    )
 
         if do_individual_fits:
             for abl, res in results.items():
@@ -274,21 +307,27 @@ def prep_psy(
                 }
             )
 
-    points = pd.DataFrame(all_pts, columns=["subject", "ABL", "ILD", "PropLeft"])
-    jnd_indiv = pd.DataFrame(jnd_rows, columns=["subject", "ABL", "JND"])
+    points = pd.DataFrame(
+        all_pts,
+        columns=["subject", "dataset_key", "cohort", "ABL", "ILD", "PropLeft"],
+    )
+    jnd_indiv = pd.DataFrame(
+        jnd_rows,
+        columns=["subject", "dataset_key", "cohort", "ABL", "JND"],
+    )
     params = pd.DataFrame(
         param_rows,
         columns=["animal", "line", "cohort", "genotype", "dataset_key", "ABL", "slope_a", "bias_b", "lower_c", "upper_d"],
     )
 
     if points.empty:
-        psy_group = pd.DataFrame(columns=["ABL", "ILD", "mean", "sem", "n"])
+        psy_group = pd.DataFrame(columns=["ABL", "ILD", "mean", "sem", "ci95_low", "ci95_high", "n", "n_strata"])
         return points, psy_group, per_subject_curves, {}, jnd_indiv, params
 
-    psy_group = (
-        points.groupby(["ABL", "ILD"])["PropLeft"]
-        .agg(mean="mean", sem=sem, n="count")
-        .reset_index()
+    psy_group = summarize_animal_mean_ci(
+        points.rename(columns={"subject": "animal"}),
+        value_col="PropLeft",
+        group_cols=["ABL", "ILD"],
     )
 
     mean_fits: Dict[int, dict | None] = {}
@@ -304,7 +343,8 @@ def prep_psy(
         n_trials = np.full_like(ILDs, 50)
         try:
             _, _, xx, yy = Psychometric.fit_and_plot_psychometric(
-                ILDs, y, model="my_psycho", n_trials=n_trials, show_plot=False
+                ILDs, y, model="my_psycho", n_trials=n_trials, show_plot=False,
+                fit_method="least_squares",
             )
             mean_fits[int(abl)] = dict(xx=xx, yy=yy)
         except Exception:
@@ -372,25 +412,42 @@ def compute_jnd_individuals_by_view(prepared: Dict[str, dict], skip_abl: int = 5
             if jnd_df is None or jnd_df.empty:
                 continue
             for _, r in jnd_df.iterrows():
-                rows.append({"subject": subject, "ABL": int(r["ABL"]), "JND": float(r["JND"])})
-        out[view_name] = pd.DataFrame(rows, columns=["subject", "ABL", "JND"])
+                rows.append(
+                    {
+                        "subject": subject,
+                        "dataset_key": (
+                            df_subj["dataset_key"].iloc[0]
+                            if "dataset_key" in df_subj.columns and not df_subj.empty
+                            else "single_cohort"
+                        ),
+                        "cohort": (
+                            df_subj["cohort"].iloc[0]
+                            if "cohort" in df_subj.columns and not df_subj.empty else pd.NA
+                        ),
+                        "ABL": int(r["ABL"]),
+                        "JND": float(r["JND"]),
+                    }
+                )
+        out[view_name] = pd.DataFrame(
+            rows, columns=["subject", "dataset_key", "cohort", "ABL", "JND"]
+        )
 
     return out
 
 
 def compute_group_jnd_by_view(jnd_indiv_by_view: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
     """
-    Returns {view_name: group_jnd_df} with columns [ABL, mean, sem, n]
+    Returns animal-level mean JND and stratified-bootstrap 95% CI by ABL.
     """
     out: Dict[str, pd.DataFrame] = {}
     for view_name, dfj in jnd_indiv_by_view.items():
         if dfj is None or dfj.empty:
-            out[view_name] = pd.DataFrame(columns=["ABL", "mean", "sem", "n"])
+            out[view_name] = pd.DataFrame(columns=["ABL", "mean", "sem", "ci95_low", "ci95_high", "n", "n_strata"])
             continue
-        g = (
-            dfj.groupby("ABL")["JND"]
-            .agg(mean="mean", sem=sem, n="count")
-            .reset_index()
+        g = summarize_animal_mean_ci(
+            dfj.rename(columns={"subject": "animal"}),
+            value_col="JND",
+            group_cols=["ABL"],
         )
         out[view_name] = g
     return out

@@ -11,6 +11,7 @@ os.chdir(ROOT)
 sys.path.insert(0, ROOT)
 
 from analysis.datasets import dataset_key, load_line_across_cohorts, load_dataset_selections
+from analysis.uncertainty import add_ci95_figure_note, ci95_yerr
 from GroupComparison.config import (
     ViewSpec, FilterConfig, PlotStyle, GroupComparisonConfig,
     OverlaySpec, JNDOverlaySpec,
@@ -177,7 +178,7 @@ def add_views_jnd_inset(ax_parent, genotype, cohorts, group_jnd_by_view, cohort_
             ax_inset.errorbar(
                 abl + offsets[cohort],
                 float(row["mean"]),
-                yerr=float(row["sem"]),
+                yerr=ci95_yerr(row.to_frame().T),
                 fmt=style_cfg["marker"],
                 color=c,
                 markerfacecolor=mfc,
@@ -219,7 +220,7 @@ def add_abls_jnd_inset(ax_parent, abl, genotypes, cohorts, group_jnd_by_view, ge
             ax_inset.errorbar(
                 genotype_positions[genotype] + offsets[cohort],
                 float(row["mean"]),
-                yerr=float(row["sem"]),
+                yerr=ci95_yerr(row.to_frame().T),
                 fmt=style_cfg["marker"],
                 color=c,
                 markerfacecolor=mfc,
@@ -615,6 +616,10 @@ if MAKE_ABLS_FIG:
 if MAKE_JND_FIG:
     fig_jnd = plot_jnd_overlay_figure(jnd_indiv_by_view, genotypes, cohorts, cohort_styles, jnd_overlay, style)
     out_jnd = {"figure": fig_jnd, "jnd_indiv_by_view": jnd_indiv_by_view}
+
+for figure in (fig1, fig2, fig_jnd):
+    if figure is not None:
+        add_ci95_figure_note(figure)
 
 plt.show()
 

@@ -42,7 +42,10 @@ class PlotStyle:
 
 @dataclass(frozen=True)
 class GroupComparisonConfig:
-    error_mode: str = "individuals"   # "sem" or "individuals"
+    # "individuals" overlays animal traces; "sem" retains the historical
+    # group-only mode name. Group error bars/bands are 95% animal-level CIs in
+    # both modes, with dataset_key-stratified bootstrap for pooled cohorts.
+    error_mode: str = "individuals"
     skip_psy_fits: Tuple[int, ...] = (50,)
     psychometric_aggregation: str = "animal_trials"
     # "animal_trials" = pool all filtered trials per animal before psychometric fit

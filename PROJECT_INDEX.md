@@ -1,70 +1,45 @@
-# Mafalda_analysis – reusable code map
+# Mafalda_analysis – project map
 
-## Core reusable modules (import these)
-- analysis/datasets.py
-  - DatasetSpec(...)
-  - resolve_data_dir(spec)
+## Start here
 
-- pipeline.py
-  - ViewSpec(name, color, selector)
-  - AnalysisConfig(...)
-  - build_prepared(spec, views, cfg, profile=...) -> bundle
+- [notebooks/ASD/](notebooks/ASD/): ASD merge, daily review, group comparison, stimulus duration, biased blocks, learning curves, trial selection, and GLM workflows.
+- [notebooks/Stakes/](notebooks/Stakes/): Stakes merge, daily review, group analysis, kernel timing, and trial selection workflows.
+- [scripts/](scripts/): runnable analyses and command-line entrypoints; see [scripts/README.md](scripts/README.md).
 
-- views.py (repo root)
-  - (general code for group selection, i use similar code in other (still) non-modular scripts so tis should become universal)
+## Reusable Python code
 
-- session_profiles.py
-  - SessionProfile definitions / per-session-type settings (if used)
+| Location | Purpose |
+| --- | --- |
+| [analysis/](analysis/) | Dataset resolution, daily merging, and psychometric analysis |
+| [Pipeline/](Pipeline/) | Workflow modules for daily plots/reports, group comparisons, learning curves, across-session analysis, biased blocks, and stimulus duration |
+| [Helpers/](Helpers/) | Shared data preparation helpers |
+| [GroupComparison/](GroupComparison/) | Group comparison configuration, preparation, plotting, layouts, and runners |
+| [StimDur/](StimDur/) | Stimulus duration configuration, preparation, plotting, layouts, and runners |
+| [Juananalysis/](Juananalysis/) | Kernel regression and related analysis; imported by current workflows |
+| [basic_ramp.py](basic_ramp.py) | Sound ramp functions used by the Stakes kernel timing notebook |
 
-- metrics.py
-  - shared metrics computations (if used)
+Keep these package locations stable unless their imports and path assumptions are updated together.
 
-- Helpers/ (package)
-  - DataHelpers.py (prepare_data, restrict_subjects, shift_ILD_for_ABL50, overlays helpers, etc.)
+## Data and results
 
-- analysis/psychometric.py
-  - compute_psychometrics_by_ABL
-  - fit_and_plot_psychometric
+- [DataFiles/](DataFiles/): datasets organized by genetic line/cohort and animal, with cohort metadata and merged files.
+- [outputs/](outputs/): generated figures, tables, daily reports, and executed notebooks.
+- [outputs/data_corrections/](outputs/data_corrections/): preserve data correction artifacts.
+- Existing GLM run folders remain under their DataFiles cohort directories; relocating them requires updating script paths.
 
-## GroupComparison plotting package (reusable)
-Folder: plotting/GroupComparison/
-- api.py
-  - plot_groupcomparison(...)
+Duration metadata conventions differ by line and cohort. Inspect the schema before filtering or rebuilding datasets; do not assume a universal RT duration rule.
 
-- layouts.py
-  - plot_views_as_rows_1x3(...)
-  - plot_abls_as_rows_4x3(...)
+## Notes and history
 
-- layouts_multi.py
-  - multi-bundle overlay layouts (compare across line/cohort)
+- [docs/](docs/): schema notes and notebook follow-ups.
+- [docs/data_corrections/](docs/data_corrections/): dated records of session-type corrections. Original filenames and contents are preserved.
+- [archive/legacy_code/](archive/legacy_code/): historical scripts formerly under History/; retained for reference.
+- [archive/snapshots/](archive/snapshots/): historical source archives, including GroupComparison.zip, which differs from the current code.
+- [notebooks/legacy/](notebooks/legacy/): historical notebooks.
+- [allfiles.txt](allfiles.txt): historical file inventory; paths describe the old layout.
 
-- traces.py
-  - plot_rt(...)
-  - plot_mt(...)
-  - plot_psy(...)
+## Environment
 
-- overlays.py
-  - neurotypical overlays / make_fig1 overlays (if separated here)
-
-- style.py
-  - style_axes(...)
-  - relabel_ticks_minus18_plus18_as_50(...) (formatter version)
-
-- jnd.py
-  - compute_group_jnd(...)
-  - plot_old_vs_new_jnd_scatter(...)  (returns fig; no plt.show)
-
-## “Runner” scripts (don’t reuse directly; they call the modules above and some will be legacy soon after being improved)
-Folder: scripts/
-- Across_sessions.py
-- DailyPlots.py
-- GLM_rats_ASDcohort2.py
-- GLM_rats_ASDcohort2_glmmTMB.py
-- GLM_rats_ASDcohort2_r2_plotting.py
-- GLM_rats_genotype_cohort_inference_glmmTMB.py
-- make_fig1.py
-- histograms_timings.py, QQplots.py, psy_param_all.py, etc.
-
-## Data / outputs (not imported)
-- DataFiles/
-- ASDcohort2GLM.png
+- [environment.yml](environment.yml): Conda environment specification.
+- [python-version.txt](python-version.txt): recorded Python version.
+- `.conda/`: local environment; do not treat it as disposable cache.

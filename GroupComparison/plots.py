@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 import Helpers.DataHelpers as DataHelpers
+from analysis.uncertainty import ci95_yerr, summarize_animal_mean_ci
 
 from .config import PlotStyle, GroupComparisonConfig, JNDOverlaySpec
 
@@ -70,7 +71,7 @@ def plot_rt_on_ax(
             return
         x = _maybe_shift(sub["ILD"], cfg)
         ax.errorbar(
-            x, sub["mean"], yerr=sub["sem"], fmt=marker, color=color,
+            x, sub["mean"], yerr=ci95_yerr(sub), fmt=marker, color=color,
             markerfacecolor=markerfacecolor, markeredgecolor=color,
             markersize=8.5, linewidth=0, elinewidth=1.5, capsize=3,
         )
@@ -87,7 +88,7 @@ def plot_rt_on_ax(
         return
     x = _maybe_shift(sub["ILD"], cfg)
     ax.errorbar(
-        x, sub["mean"], yerr=sub["sem"], fmt=marker, color=color,
+        x, sub["mean"], yerr=ci95_yerr(sub), fmt=marker, color=color,
         markerfacecolor=markerfacecolor, markeredgecolor=color,
         markersize=8.5, linewidth=0, elinewidth=1.5, capsize=3,
     )
@@ -115,7 +116,7 @@ def plot_mt_on_ax(
             return
         x = _maybe_shift(sub["ILD"], cfg)
         ax.errorbar(
-            x, sub["mean"], yerr=sub["sem"], fmt=marker, color=color,
+            x, sub["mean"], yerr=ci95_yerr(sub), fmt=marker, color=color,
             markerfacecolor=markerfacecolor, markeredgecolor=color,
             markersize=8.5, linewidth=0, elinewidth=1.5, capsize=3,
         )
@@ -132,7 +133,7 @@ def plot_mt_on_ax(
         return
     x = _maybe_shift(sub["ILD"], cfg)
     ax.errorbar(
-        x, sub["mean"], yerr=sub["sem"], fmt=marker, color=color,
+        x, sub["mean"], yerr=ci95_yerr(sub), fmt=marker, color=color,
         markerfacecolor=markerfacecolor, markeredgecolor=color,
         markersize=8.5, linewidth=0, elinewidth=1.5, capsize=3,
     )
@@ -162,7 +163,7 @@ def plot_psy_on_ax(
     sub = psy_group[psy_group["ABL"] == abl]
     if not sub.empty:
         x_vals = _maybe_shift(sub["ILD"], cfg)
-        ax.errorbar(x_vals, sub["mean"], yerr=sub["sem"],
+        ax.errorbar(x_vals, sub["mean"], yerr=ci95_yerr(sub),
                     fmt=marker, color=color, markersize=8.5,
                     markerfacecolor=markerfacecolor, markeredgecolor=color,
                     linewidth=0, elinewidth=1.5, capsize=3)
@@ -275,7 +276,7 @@ def plot_psychometric_animals_plus_average(
                     ax.errorbar(
                         _maybe_shift(subm["ILD"], cfg),
                         subm["mean"],
-                        yerr=subm["sem"],
+                        yerr=ci95_yerr(subm),
                         fmt="o",
                         color=c,
                         markerfacecolor=c,
@@ -1603,10 +1604,15 @@ def plot_jnd_comparison_per_view(
         # --- NEW dataset (filled circles) ---
         df_new = jnd_indiv_by_view.get(vn, pd.DataFrame())
         if df_new is not None and not df_new.empty and summary_only:
-            summary = df_new.groupby("ABL")["JND"].agg(["mean", "sem"])
-            for abl, row in summary.iterrows():
+            summary = summarize_animal_mean_ci(
+                df_new.rename(columns={"subject": "animal"}),
+                value_col="JND",
+                group_cols=["ABL"],
+            )
+            for _, row in summary.iterrows():
+                abl = int(row["ABL"])
                 ax.errorbar(
-                    abl, row["mean"], yerr=0 if pd.isna(row["sem"]) else row["sem"],
+                    abl, row["mean"], yerr=ci95_yerr(row.to_frame().T),
                     fmt="o", color=abl_color_map.get(int(abl), "gray"), capsize=4,
                 )
         elif df_new is not None and not df_new.empty:
@@ -1643,7 +1649,7 @@ def plot_jnd_comparison_per_view(
 #     x_offsets: Optional[Dict[str, float]] = None,
 # ):
 #     """
-#     Adds an inset with group mean±SEM JNDs for each view.
+#     Adds an inset with group mean and 95% CI JNDs for each view.
 #     Uses small x offsets so multiple genotypes at same ABL don't overlap.
 #     """
 
@@ -1699,7 +1705,7 @@ def add_jnd_inset_abl_colored(
     inset_rect=(0.70, 0.15, 0.30, 0.30),
 ):
     """
-    Inset for views_3x3: shows group mean±SEM JND for all ABLs,
+    Inset for views_3x3: shows group mean and 95% CI JND for all ABLs,
     dot color matches the ABL curve colors.
     """
     import pandas as pd
@@ -1719,7 +1725,7 @@ def add_jnd_inset_abl_colored(
         c = abl_colors.get(abl, "gray")
         ax_inset.errorbar(
             abl, float(row["mean"]),
-            yerr=float(row["sem"]),
+            yerr=ci95_yerr(row.to_frame().T),
             fmt="o",
             color=c,
             markersize=7,
@@ -1776,7 +1782,7 @@ def add_jnd_inset_single_abl(
 
         ax_inset.errorbar(
             x, float(row["mean"]),
-            yerr=float(row["sem"]),
+            yerr=ci95_yerr(row.to_frame().T),
             fmt="o",
             color=c,
             markersize=7,

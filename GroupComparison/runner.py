@@ -34,7 +34,7 @@ def run_groupcomparison(
 ) -> Dict[str, Any]:
     """
     - layout="views_3x3": returns main 3x3 fig + separate per-view JND comparison fig (old vs new individuals)
-    - layout="abls_4x3": returns main 4x3 fig with JND inset inside psychometrics (group mean±SEM), no separate JND fig
+    - layout="abls_4x3": returns main 4x3 fig with JND inset inside psychometrics (group mean and 95% CI), no separate JND fig
     """
     if df is None:
         if cohort_csv is None:

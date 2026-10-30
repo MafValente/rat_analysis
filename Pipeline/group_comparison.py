@@ -9,6 +9,7 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.figure import Figure
 
 from analysis.datasets import dataset_key, load_dataset_selections
 from GroupComparison.config import (
@@ -32,6 +33,7 @@ from GroupComparison.plots import (
     plot_summary_metrics_all_views,
     plot_psychometric_params_all_views,
 )
+from analysis.uncertainty import add_ci95_figure_note
 from GroupComparison.prepare import apply_filters, build_prepared, compute_group_jnd_by_view, compute_jnd_individuals_by_view
 
 
@@ -741,6 +743,18 @@ def plot_flexible_groupcomparison(
         raise ValueError(
             f"Unknown layout='{layout}'. Use 'views_3x3', 'abls_4x3', 'animals_plus_mean', 'psy_params', 'summary_metrics', 'summary_aborts', 'chronometrics', or 'chronometrics_pooled'."
         )
+
+    # Individual-parameter/summary panels show raw animal points and therefore
+    # do not need an uncertainty-definition note. All group-mean figures do.
+    if layout not in {"psy_params", "summary_metrics", "summary_aborts"}:
+        def _annotate_figures(value):
+            if isinstance(value, Figure):
+                add_ci95_figure_note(value)
+            elif isinstance(value, dict):
+                for child in value.values():
+                    _annotate_figures(child)
+
+        _annotate_figures(figs)
 
     if show:
         plt.show()

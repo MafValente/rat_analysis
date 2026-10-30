@@ -1,12 +1,16 @@
 #%%
 import argparse
 from argparse import ArgumentParser
+import json
 import os
 from pathlib import Path
 import pickle
+import sys
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 os.environ.setdefault("MPLCONFIGDIR", str(ROOT / ".matplotlib"))
 conda_r_home = Path(os.environ.get("CONDA_PREFIX", "")) / "lib" / "R"
 if conda_r_home.is_dir():
@@ -18,6 +22,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import seaborn as sns
+
+from Helpers.PlotHelpers import apply_axis_limit_config
 
 
 GROUP_NAMES = ["WT", "HET", "HOM"]
@@ -105,6 +111,11 @@ def parse_args():
         default=None,
         type=Path,
         help="Optional conditional-effects figure path. Default: conditional_effects.png next to --results.",
+    )
+    parser.add_argument(
+        "--axis-limits-json",
+        default="{}",
+        help="JSON mapping of fixed_effects/blups/conditional_effects axis-limit rules.",
     )
     args, unknown = parser.parse_known_args()
     if unknown:
@@ -921,6 +932,7 @@ def plot_model_results(model_results, var_group_names, include_r2=True, title=No
 
 def main():
     args = parse_args()
+    axis_limits = json.loads(args.axis_limits_json)
     results_path = args.results or find_latest_results()
     results_path = results_path.expanduser()
     print(f"Using results bundle: {results_path}")
@@ -971,6 +983,11 @@ def main():
         include_r2=frac_r2_all is not None,
         title=title,
     )
+    apply_axis_limit_config(
+        {"fixed_effects": fig},
+        {"fixed_effects": axis_limits.get("fixed_effects", {})},
+        redisplay=False,
+    )
     save_plot = args.save_plot or results_path.with_name(
         f"{outcome}_fixed_effects_with_random.png"
     )
@@ -985,6 +1002,11 @@ def main():
 
     if args.plot_blups:
         blup_fig = plot_blups(blups, bundle, title=title)
+        apply_axis_limit_config(
+            {"blups": blup_fig},
+            {"blups": axis_limits.get("blups", {})},
+            redisplay=False,
+        )
         save_blup_plot = args.save_blup_plot or results_path.with_name(f"{outcome}_subject_blups.png")
         blup_fig.savefig(save_blup_plot, dpi=300, bbox_inches="tight")
         print(f"Saved BLUP plot to {save_blup_plot}")
@@ -996,6 +1018,11 @@ def main():
         print(f"Saved conditional-effects table to {conditional_path}")
 
         conditional_fig = plot_conditional_effects(conditional, bundle, title=title)
+        apply_axis_limit_config(
+            {"conditional_effects": conditional_fig},
+            {"conditional_effects": axis_limits.get("conditional_effects", {})},
+            redisplay=False,
+        )
         save_conditional_plot = (
             args.save_conditional_plot
             or results_path.with_name(f"{outcome}_conditional_effects.png")

@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from psychofit import mle_fit_psycho, weibull, weibull50, erf_psycho, erf_psycho_2gammas
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, minimize
 from scipy.special import erf
 
 MIN_ILD_POINTS_FOR_FIT = 4
@@ -26,10 +26,48 @@ def my_psycho_model(x, a, b, c, d):
     return c + (d-c) / (1 + np.exp(-(2*a) * (x-b)))
 
 
+def _fit_binomial_mle(psyfun, x_data, proportions, n_trials, p0, bounds):
+    """Fit a psychometric function by maximizing the binomial likelihood."""
+    x_data = np.asarray(x_data, dtype=float)
+    proportions = np.asarray(proportions, dtype=float)
+    n_trials = np.asarray(n_trials, dtype=float)
+
+    if not (x_data.shape == proportions.shape == n_trials.shape):
+        raise ValueError("xData, yData, and n_trials must have matching shapes.")
+    if not np.isfinite(x_data).all() or not np.isfinite(proportions).all():
+        raise ValueError("Psychometric inputs must be finite.")
+    if np.any((proportions < 0) | (proportions > 1)):
+        raise ValueError("Psychometric proportions must be between 0 and 1.")
+    if not np.isfinite(n_trials).all() or np.any(n_trials <= 0):
+        raise ValueError("n_trials must contain positive finite values.")
+
+    successes = n_trials * proportions
+
+    def negative_log_likelihood(pars):
+        probabilities = np.clip(psyfun(x_data, *pars), 1e-12, 1 - 1e-12)
+        log_likelihood = np.sum(
+            successes * np.log(probabilities)
+            + (n_trials - successes) * np.log1p(-probabilities)
+        )
+        return -float(log_likelihood)
+
+    result = minimize(
+        negative_log_likelihood,
+        x0=np.asarray(p0, dtype=float),
+        method="L-BFGS-B",
+        bounds=list(zip(*bounds)),
+    )
+    if not result.success or not np.isfinite(result.fun):
+        raise RuntimeError(f"Binomial psychometric fit failed: {result.message}")
+
+    return np.asarray(result.x, dtype=float), -float(result.fun)
+
+
 def fit_and_plot_psychometric(xData, yData, model,
                               n_trials,
                               parstart=None, parmin=None, parmax=None,
-                              show_plot=True, ax=None, save_path=None):
+                              show_plot=True, ax=None, save_path=None,
+                              fit_method="binomial_mle"):
     """
     Wrapper around psychofit.mle_fit_psycho that takes xData = ILDs
     and yData = proportion of leftward trials at each ILD.
@@ -53,13 +91,17 @@ def fit_and_plot_psychometric(xData, yData, model,
         Axis to plot into (if None, creates new figure).
     save_path : str, optional
         If provided, save the plot instead of showing.
+    fit_method : {"binomial_mle", "least_squares"}
+        Estimator for the custom ``my_psycho`` model. Binomial maximum
+        likelihood is the default; least squares is retained for reproducing
+        older fits. Models supplied by psychofit continue to use its MLE.
     
     Returns
     -------
     pars : np.ndarray
         Best-fit parameters.
     L : float
-        Likelihood of the best fit.
+        Log likelihood of the best fit (NaN for least-squares fits).
     """
     
     xData = np.asarray(xData)
@@ -79,27 +121,31 @@ def fit_and_plot_psychometric(xData, yData, model,
     #print("PropLeft:", yData)
     #print("n_trials:", n_trials)
 
-    if parstart is None:
-        if model.startswith("weibull"):
-            parstart = [np.median(xData), 2.0, 0.05]   # [threshold, slope, lapse]
-            parmin   = [min(xData), 0.1, 0]
-            parmax   = [max(xData), 10.0, 0.5]
-        elif model == "erf_psycho":
-            parstart = [0.0, 5.0, 0.05]                # [bias, slope, lapse]
-            parmin   = [min(xData), 0.1, 0]
-            parmax   = [max(xData), 10.0, 0.5]
-        elif model == "erf_psycho_2gammas":
-            parstart = [0.0, 5.0, 0.05, 0.05]
-            parmin   = [min(xData), 0.1, 0, 0]
-            parmax   = [max(xData), 10.0, 0.5, 0.5]
-        elif model == "erf_4par":
-            parstart = [0.0, 5.0, 0.05, 0.05]  # [bias, slope, γ, λ]
-            parmin   = [min(xData), 0.1, 0, 0]
-            parmax   = [max(xData), 10.0, 0.5, 0.5]
-        elif model=="my_psycho":
-            parstart = [1, 0, 0.05, 0.95]  # [slope, bias, c, d]
-            parmin   = [0.1, min(xData), 0, 0]
-            parmax   = [10.0, max(xData), 1, 1]
+    if model.startswith("weibull"):
+        defaults = ([np.median(xData), 2.0, 0.05],
+                    [min(xData), 0.1, 0], [max(xData), 10.0, 0.5])
+    elif model == "erf_psycho":
+        defaults = ([0.0, 5.0, 0.05],
+                    [min(xData), 0.1, 0], [max(xData), 10.0, 0.5])
+    elif model == "erf_psycho_2gammas":
+        defaults = ([0.0, 5.0, 0.05, 0.05],
+                    [min(xData), 0.1, 0, 0], [max(xData), 10.0, 0.5, 0.5])
+    elif model == "erf_4par":
+        defaults = ([0.0, 5.0, 0.05, 0.05],
+                    [min(xData), 0.1, 0, 0], [max(xData), 10.0, 0.5, 0.5])
+    elif model == "my_psycho":
+        defaults = ([1.0, 0.0, 0.05, 0.95],
+                    [0.1, min(xData), 0, 0], [10.0, max(xData), 1, 1])
+    else:
+        raise ValueError(f"Unknown psychometric model: {model}")
+
+    default_start, default_min, default_max = defaults
+    parstart = default_start if parstart is None else parstart
+    parmin = default_min if parmin is None else parmin
+    parmax = default_max if parmax is None else parmax
+
+    if fit_method not in {"binomial_mle", "least_squares"}:
+        raise ValueError("fit_method must be 'binomial_mle' or 'least_squares'.")
 
     # fit
     """ 
@@ -136,12 +182,16 @@ def fit_and_plot_psychometric(xData, yData, model,
     psyfun = dispatcher[model]
 
     if model == "my_psycho":
-        p0 = [1.0, 0.0, 0.05, 0.95]  # adjust to your model’s parameter meaning
-        bounds = ([0.1, min(xData), 0, 0],
-                [10.0, max(xData), 1, 1])
+        p0 = parstart
+        bounds = (parmin, parmax)
         psyfun = dispatcher[model]
-        pars, _ = curve_fit(psyfun, xData, yData, p0=p0, bounds=bounds)
-        L = np.nan
+        if fit_method == "binomial_mle":
+            pars, L = _fit_binomial_mle(
+                psyfun, xData, yData, n_trials, p0=p0, bounds=bounds
+            )
+        else:
+            pars, _ = curve_fit(psyfun, xData, yData, p0=p0, bounds=bounds)
+            L = np.nan
     elif model == "erf_4par":
         p0 = [1.0, 0.0, 0.05, 0.95]
         bounds = ([0.1, min(xData), 0, 0.5],
@@ -232,7 +282,11 @@ def compute_psychometrics_by_ABL(df_last, model="my_psycho", min_ilds_for_fit=4)
         # Flip for negative ILDs (keep your behavior)
         PropLeft = np.where(ILDs < 0, 1 - PropLeft, PropLeft)
 
-        n_trials = np.array([(df_sub["ILD"] == ild).sum() for ild in ILDs], dtype=int)
+        success = np.asarray(df_sub["success"])
+        n_trials = np.array([
+            ((df_sub["ILD"] == ild) & (success != 0)).sum()
+            for ild in ILDs
+        ], dtype=int)
 
         # Default: no fit
         pars, L, xx, yy = None, np.nan, None, None

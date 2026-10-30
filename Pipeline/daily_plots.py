@@ -632,6 +632,7 @@ def prepare_stakes_group_data(
                     model="my_psycho",
                     n_trials=np.full_like(ilds, 50, dtype=int),
                     show_plot=False,
+                    fit_method="least_squares",
                 )
                 mean_fits[int(abl)] = {"xx": xx, "yy": yy}
             except Exception:
@@ -668,6 +669,7 @@ def prepare_stakes_group_data(
                     model="my_psycho",
                     n_trials=np.full_like(ilds, 50, dtype=int),
                     show_plot=False,
+                    fit_method="least_squares",
                 )
                 mean_fits_by_ramp[key] = {"xx": xx, "yy": yy}
             except Exception:

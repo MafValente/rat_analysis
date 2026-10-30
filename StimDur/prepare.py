@@ -211,7 +211,7 @@ def prep_psy(
                 ILDs = np.asarray(res["ILDs"])
                 pleft = np.asarray(res["PropLeft"], dtype=float)
                 if len(ILDs) >= 4 and np.isfinite(pleft).all():
-                    n_trials = np.full_like(ILDs, 50)
+                    n_trials = np.asarray(res["n_trials"], dtype=int)
                     try:
                         _, _, xx, yy = Psychometric.fit_and_plot_psychometric(
                             ILDs, pleft, model="my_psycho", n_trials=n_trials, show_plot=False
@@ -231,7 +231,8 @@ def prep_psy(
             n_trials = np.full_like(ILDs, 50)
             try:
                 _, _, xx, yy = Psychometric.fit_and_plot_psychometric(
-                    ILDs, y, model="my_psycho", n_trials=n_trials, show_plot=False
+                    ILDs, y, model="my_psycho", n_trials=n_trials, show_plot=False,
+                    fit_method="least_squares",
                 )
                 mean_fits[int(abl)] = {"xx": xx, "yy": yy}
             except Exception:
@@ -267,7 +268,7 @@ def prep_psy(
                 )
 
             if do_individual_fits and len(ILDs) >= 4 and np.isfinite(pleft).all():
-                n_trials = np.full_like(ILDs, 50)
+                n_trials = np.asarray(res["n_trials"], dtype=int)
                 try:
                     _, _, xx, yy = Psychometric.fit_and_plot_psychometric(
                         ILDs, pleft, model="my_psycho", n_trials=n_trials, show_plot=False
@@ -304,7 +305,8 @@ def prep_psy(
         n_trials = np.full_like(ILDs, 50)
         try:
             _, _, xx, yy = Psychometric.fit_and_plot_psychometric(
-                ILDs, y, model="my_psycho", n_trials=n_trials, show_plot=False
+                ILDs, y, model="my_psycho", n_trials=n_trials, show_plot=False,
+                fit_method="least_squares",
             )
             mean_fits[int(abl)] = {"xx": xx, "yy": yy}
         except Exception:

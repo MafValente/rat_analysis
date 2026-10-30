@@ -9,6 +9,7 @@ import pandas as pd
 
 import Helpers.DataHelpers as DataHelpers
 from analysis import psychometric as Psychometric
+from analysis.uncertainty import ci95_yerr, summarize_animal_mean_ci
 
 from .config import ViewSpec, GroupComparisonConfig, PlotStyle, OverlaySpec
 from .plots import (
@@ -200,32 +201,34 @@ def _pooled_chrono_group(tables: dict, metric: str) -> pd.DataFrame:
         raise ValueError("metric must be 'rt' or 'mt'.")
 
     if per_subj.empty:
-        return pd.DataFrame(columns=["ILD", "mean", "sem", "n"])
+        return pd.DataFrame(columns=["ILD", "mean", "sem", "ci95_low", "ci95_high", "n", "n_strata"])
 
+    subject_cols = ["dataset_key", "animal", "ILD"] if "dataset_key" in per_subj.columns else ["animal", "ILD"]
     pooled_subject = (
-        per_subj.groupby(["animal", "ILD"], as_index=False)[value_col]
+        per_subj.groupby(subject_cols, as_index=False, dropna=False)[value_col]
         .mean()
     )
-    return (
-        pooled_subject.groupby("ILD")[value_col]
-        .agg(mean="mean", sem=lambda x: x.std(ddof=1) / np.sqrt(x.count()) if x.count() > 1 else np.nan, n="count")
-        .reset_index()
+    return summarize_animal_mean_ci(
+        pooled_subject,
+        value_col=value_col,
+        group_cols=["ILD"],
     )
 
 
 def _pooled_psychometric_group(tables: dict) -> pd.DataFrame:
     points = tables["psy_points"].copy()
     if points.empty:
-        return pd.DataFrame(columns=["ILD", "mean", "sem", "n"])
+        return pd.DataFrame(columns=["ILD", "mean", "sem", "ci95_low", "ci95_high", "n", "n_strata"])
+    subject_cols = ["dataset_key", "subject", "ILD"] if "dataset_key" in points.columns else ["subject", "ILD"]
     per_subject = (
-        points.groupby(["subject", "ILD"], dropna=False)["PropLeft"]
+        points.groupby(subject_cols, dropna=False)["PropLeft"]
         .mean()
         .reset_index()
     )
-    return (
-        per_subject.groupby("ILD", dropna=False)["PropLeft"]
-        .agg(mean="mean", sem=lambda x: x.std(ddof=1) / np.sqrt(x.count()) if x.count() > 1 else np.nan, n="count")
-        .reset_index()
+    return summarize_animal_mean_ci(
+        per_subject.rename(columns={"subject": "animal"}),
+        value_col="PropLeft",
+        group_cols=["ILD"],
     )
 
 
@@ -247,7 +250,7 @@ def _plot_pooled_psychometric_on_ax(
     x = pd.to_numeric(df["ILD"], errors="coerce").to_numpy(dtype=float)
     display_x = _maybe_shift(x, cfg)
     y = pd.to_numeric(df["mean"], errors="coerce").to_numpy(dtype=float)
-    yerr = pd.to_numeric(df["sem"], errors="coerce").to_numpy(dtype=float)
+    yerr = ci95_yerr(df)
     ax.errorbar(display_x, y, yerr=yerr, fmt=marker, color=color, markerfacecolor=markerfacecolor,
                 markeredgecolor=color, markersize=8.5, linewidth=0, elinewidth=1.5, capsize=3)
     finite = np.isfinite(x) & np.isfinite(y)
@@ -258,6 +261,7 @@ def _plot_pooled_psychometric_on_ax(
             x[finite], y[finite], model="my_psycho",
             n_trials=np.clip(df.loc[finite, "n"].to_numpy(dtype=float), 1, None).astype(int),
             show_plot=False,
+            fit_method="least_squares",
         )
     except (RuntimeError, ValueError, FloatingPointError):
         return
@@ -280,7 +284,9 @@ def _plot_chrono_mean_shaded(
     df = group_df.sort_values("ILD").copy()
     x = _maybe_shift(df["ILD"], cfg)
     y = df["mean"].to_numpy(dtype=float)
-    sem = df["sem"].fillna(0).to_numpy(dtype=float)
+    errors = ci95_yerr(df)
+    low = y - errors[0]
+    high = y + errors[1]
     ax.plot(
         x,
         y,
@@ -292,7 +298,7 @@ def _plot_chrono_mean_shaded(
         markerfacecolor=markerfacecolor,
         markeredgecolor=color,
     )
-    ax.fill_between(x, y - sem, y + sem, color=color, alpha=0.18, linewidth=0)
+    ax.fill_between(x, low, high, color=color, alpha=0.18, linewidth=0)
 
 
 def _chrono_ylim(frames: List[pd.DataFrame]) -> tuple[float, float] | None:
@@ -302,9 +308,9 @@ def _chrono_ylim(frames: List[pd.DataFrame]) -> tuple[float, float] | None:
         if frame is None or frame.empty:
             continue
         y = pd.to_numeric(frame["mean"], errors="coerce")
-        sem = pd.to_numeric(frame["sem"], errors="coerce").fillna(0)
-        low = (y - sem).replace([np.inf, -np.inf], np.nan).dropna()
-        high = (y + sem).replace([np.inf, -np.inf], np.nan).dropna()
+        errors = ci95_yerr(frame)
+        low = pd.Series(y.to_numpy(dtype=float) - errors[0]).replace([np.inf, -np.inf], np.nan).dropna()
+        high = pd.Series(y.to_numpy(dtype=float) + errors[1]).replace([np.inf, -np.inf], np.nan).dropna()
         if not low.empty:
             lows.append(float(low.min()))
         if not high.empty:
@@ -353,7 +359,7 @@ def plot_chronometrics(
 
     separate_abls=True: rows are ABLs, columns are RT and MT.
     separate_abls=False: one pooled row, columns are RT and MT.
-    Always plots group means with shaded SEM, without individual animal traces.
+    Always plots group means with shaded animal-level 95% CI, without individual traces.
     """
     style = replace(style, title_fs=14, label_fs=14, tick_fs=14, legend_fs=14)
     cfg = replace(cfg, xlim_sym=(-17, 17))
@@ -513,7 +519,7 @@ def plot_chronometric_jnds(
     *,
     view_styles: Optional[Dict[str, dict]] = None,
 ) -> plt.Figure:
-    """Compact animal-mean JND ± SEM by ABL, reusing prepared fits.
+    """Compact animal-mean JND with 95% CI by ABL, reusing prepared fits.
 
     Keep ABLs separate even when the chronometric curves pool ABLs: these
     estimates come from each animal's per-ABL psychometric fits.
@@ -534,7 +540,7 @@ def plot_chronometric_jnds(
         face = appearance.get("markerfacecolor")
         ax.errorbar(
             table["ABL"], table["mean"],
-            yerr=table["sem"].fillna(0),
+            yerr=ci95_yerr(table),
             color=color, label=view.name,
             linestyle=appearance.get("linestyle", "-"),
             marker=appearance.get("marker", "o"),
@@ -542,8 +548,8 @@ def plot_chronometric_jnds(
             markeredgecolor=color, capsize=3,
         )
     style = PlotStyle(title_fs=14, label_fs=14, tick_fs=14, legend_fs=14)
-    style_axes(ax, style, "JND by ABL (mean ± SEM)", "ABL (dB)", "JND (dB)", square=False)
-    # Autoscale to the selected groups, including their SEM error bars.
+    style_axes(ax, style, "JND by ABL (mean and 95% CI)", "ABL (dB)", "JND (dB)", square=False)
+    # Autoscale to the selected groups, including their confidence intervals.
     ax.margins(y=0.15)
     ax.set_xticks(sorted(abls))
     if abls:

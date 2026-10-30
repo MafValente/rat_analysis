@@ -90,6 +90,7 @@ def _fit_psychometric_biased(
     *,
     n_trials=None,
     l2_strength: float = PSYCHOMETRIC_L2,
+    fit_method: str = "binomial_mle",
 ):
     x_data = np.asarray(x_data, dtype=float)
     y_data = np.asarray(y_data, dtype=float)
@@ -98,6 +99,8 @@ def _fit_psychometric_biased(
     y_data = y_data[finite]
     if x_data.size < 4:
         raise ValueError("Need at least 4 finite ILD points for psychometric fit.")
+    if fit_method not in {"binomial_mle", "least_squares"}:
+        raise ValueError("fit_method must be 'binomial_mle' or 'least_squares'.")
 
     if n_trials is None:
         n_trials = np.full(x_data.shape, 50.0, dtype=float)
@@ -117,12 +120,19 @@ def _fit_psychometric_biased(
             model="my_psycho",
             n_trials=n_trials.astype(int),
             show_plot=False,
+            fit_method=fit_method,
         )
 
     def objective(pars):
-        pred = Psychometric.my_psycho_model(x_data, *pars)
-        resid = pred - y_data
-        data_term = np.sum(n_trials * resid * resid)
+        pred = np.clip(Psychometric.my_psycho_model(x_data, *pars), 1e-12, 1 - 1e-12)
+        if fit_method == "binomial_mle":
+            successes = n_trials * y_data
+            data_term = -np.sum(
+                successes * np.log(pred)
+                + (n_trials - successes) * np.log1p(-pred)
+            )
+        else:
+            data_term = np.sum(n_trials * (pred - y_data) ** 2)
         penalty = float(l2_strength) * np.sum(((pars - prior) / scale) ** 2)
         return float(data_term + penalty)
 
@@ -156,7 +166,11 @@ def _compute_psychometrics_by_ABL_local(
             for ild in ilds
         ], dtype=float)
         prop_left = np.where(ilds < 0, 1 - prop_left, prop_left)
-        n_trials = np.array([(df_sub["ILD"] == ild).sum() for ild in ilds], dtype=int)
+        success = pd.to_numeric(df_sub["success"], errors="coerce")
+        n_trials = np.array([
+            ((df_sub["ILD"] == ild) & success.ne(0)).sum()
+            for ild in ilds
+        ], dtype=int)
         pars, L, xx, yy = None, np.nan, None, None
         if len(ilds) >= min_ilds_for_fit and np.isfinite(prop_left).all():
             try:
@@ -1071,10 +1085,14 @@ def _fit_mean_psy_curve(
     n_trials = np.full(len(x), 50, dtype=int)
     try:
         if float(psychometric_l2) > 0:
-            pars, _, xx, yy = _fit_psychometric_biased(x, y, n_trials=n_trials, l2_strength=psychometric_l2)
+            pars, _, xx, yy = _fit_psychometric_biased(
+                x, y, n_trials=n_trials, l2_strength=psychometric_l2,
+                fit_method="least_squares",
+            )
         else:
             pars, _, xx, yy = Psychometric.fit_and_plot_psychometric(
-                x, y, model="my_psycho", n_trials=n_trials, show_plot=False
+                x, y, model="my_psycho", n_trials=n_trials, show_plot=False,
+                fit_method="least_squares",
             )
     except Exception:
         return {}
