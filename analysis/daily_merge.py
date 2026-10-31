@@ -19,9 +19,16 @@ from pathlib import Path
 
 
 # ==========================================================
-# CONFIG: where are the data folders for each line/cohort
+# CONFIG: local daily inputs/merged outputs and Google Drive copy sources
 # ==========================================================
 BASE_DATA_DIR = "/Users/mafaldavalente/Documents/Mafalda_analysis/DataFiles"
+
+# Override this auto-discovered path when running on another computer with:
+# export MAFALDA_RAW_DATA_DIR="/path/to/ASD_MV animals"
+RAW_DATA_DIR_ENV = "MAFALDA_RAW_DATA_DIR"
+RAT_BEHAVIOR_RELATIVE_ROOT = Path(
+    "RatBehaviorRoom/Rats/ILDtask/ASD_MV animals"
+)
 
 LINE_ROOTS = {
     ("CNTNAP2", "cohort1"): "CNTNAP2_cohort1",
@@ -33,6 +40,106 @@ LINE_ROOTS = {
     ("Stakes",  "cohort2"): "Stakes_cohort2",
     # add more as needed
 }
+
+# Raw data are organised below RatBehaviorRoom/Rats/ILDtask/ASD_MV animals.
+# Each animal contains <YYMMDD>/<daily CSV> session folders.
+RAW_LINE_ROOTS = {
+    ("CNTNAP2", "cohort1"): (Path("cntnap2") / "Cohort 1",),
+    ("CNTNAP2", "cohort2"): (Path("cntnap2") / "Cohort 2",),
+    ("CNTNAP2", "cohort3"): (Path("cntnap2") / "Cohort 3",),
+    ("CNTNAP2", "cohort4"): (Path("cntnap2"),),
+    ("SHANK3", "cohort1"): (Path("Shank3") / "Cohort 1",),
+    ("SHANK3", "cohort2"): (Path("Shank3"),),
+    ("SHANK3", "cohort3"): (Path("Shank3"),),
+    ("SHANK3", "cohort4"): (Path("Shank3"),),
+    ("Stakes", "cohort2"): (Path("stakes"),),
+}
+
+
+def get_raw_data_dir():
+    """Return the mounted Google Drive ``ASD_MV animals`` directory."""
+    configured = os.environ.get(RAW_DATA_DIR_ENV)
+    if configured:
+        raw_data_dir = Path(configured).expanduser()
+        if raw_data_dir.is_dir():
+            return raw_data_dir
+        raise FileNotFoundError(
+            f"{RAW_DATA_DIR_ENV} points to a missing directory: {raw_data_dir}"
+        )
+
+    cloud_storage = Path.home() / "Library" / "CloudStorage"
+    candidates = sorted(cloud_storage.glob("GoogleDrive-renartlab@gmail.com*"))
+    for drive_mount in candidates:
+        direct_candidates = [
+            drive_mount / RAT_BEHAVIOR_RELATIVE_ROOT,
+            drive_mount / "My Drive" / RAT_BEHAVIOR_RELATIVE_ROOT,
+        ]
+        shortcut_candidates = sorted(
+            (drive_mount / ".shortcut-targets-by-id").glob(
+                f"*/{RAT_BEHAVIOR_RELATIVE_ROOT.as_posix()}"
+            )
+        )
+        for raw_data_dir in [*direct_candidates, *shortcut_candidates]:
+            if raw_data_dir.is_dir():
+                return raw_data_dir
+
+    raise FileNotFoundError(
+        "Could not find RatBehaviorRoom/Rats/ILDtask/ASD_MV animals "
+        "in the Renart Lab Google Drive. "
+        f"Expected it below {cloud_storage}, or set {RAW_DATA_DIR_ENV}."
+    )
+
+
+def get_raw_base_dirs(line="CNTNAP2", cohort="cohort2"):
+    """Return existing Google Drive roots that may contain this cohort's animals."""
+    key = (line, cohort)
+    relative_roots = RAW_LINE_ROOTS.get(key)
+    if not relative_roots:
+        known = ", ".join(
+            f"{known_line} {known_cohort}"
+            for known_line, known_cohort in sorted(RAW_LINE_ROOTS)
+        )
+        raise KeyError(
+            f"No raw Google Drive path configured for {line} {cohort}. "
+            f"Known configured datasets: {known}"
+        )
+
+    raw_data_dir = get_raw_data_dir()
+    roots = [raw_data_dir / relative_root for relative_root in relative_roots]
+    existing = [root for root in roots if root.is_dir()]
+    if not existing:
+        expected = "\n".join(str(root) for root in roots)
+        raise FileNotFoundError(
+            f"Raw data folder not found for {line} {cohort}. Expected one of:\n{expected}"
+        )
+    return existing
+
+
+def get_raw_animal_dir(line="CNTNAP2", cohort="cohort2", animal=None):
+    """Resolve one animal's Google Drive directory for copying raw CSVs locally."""
+    if not animal:
+        raise ValueError("animal is required")
+    candidates = [root / str(animal) for root in get_raw_base_dirs(line, cohort)]
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+    expected = "\n".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(
+        f"Raw Google Drive folder not found for {animal}. Expected one of:\n{expected}"
+    )
+
+
+def get_local_raw_animal_dir(line="CNTNAP2", cohort="cohort2", animal=None):
+    """Resolve the local animal folder used as input by the daily merge."""
+    if not animal:
+        raise ValueError("animal is required")
+    animal_dir = Path(get_base_dir(line, cohort)) / str(animal)
+    if not animal_dir.is_dir():
+        raise FileNotFoundError(
+            f"Local daily-file folder not found for {animal}: {animal_dir}. "
+            "Copy the missing daily CSVs from Drive before merging."
+        )
+    return animal_dir
 
 def get_base_dir(line="CNTNAP2", cohort="cohort2"):
     """
@@ -53,15 +160,13 @@ def get_base_dir(line="CNTNAP2", cohort="cohort2"):
 def get_animals_for_cohort(line="CNTNAP2", cohort="cohort2", rat=None):
     """
     Return the animals for a given line + cohort.
-    If rat is provided, return only that rat after validating it exists.
-    Prefer sex_gen.csv when available; otherwise fall back to animal folders.
+    If rat is provided, return only that animal. Prefer the local sex_gen.csv
+    cohort list; otherwise fall back to local animal folders. Source-specific
+    functions validate whether that animal exists locally or in Google Drive.
     """
     base_dir = get_base_dir(line, cohort)
 
     if rat:
-        rat_dir = os.path.join(base_dir, rat)
-        if not os.path.isdir(rat_dir):
-            raise FileNotFoundError(f"Rat folder not found: {rat_dir}")
         return [rat]
 
     sex_gen_path = os.path.join(base_dir, "sex_gen.csv")
@@ -76,21 +181,20 @@ def get_animals_for_cohort(line="CNTNAP2", cohort="cohort2", rat=None):
                     .str.strip()
                     .tolist()
                 )
-                animals = [animal for animal in animals if os.path.isdir(os.path.join(base_dir, animal))]
-                if animals:
-                    return animals
+                return animals
         except Exception as e:
             print(f"⚠️ Could not read {sex_gen_path}: {e}")
 
-    animals = [
-        entry for entry in sorted(os.listdir(base_dir))
+    return sorted(
+        entry.name
+        for entry in Path(base_dir).iterdir()
         if (
-            os.path.isdir(os.path.join(base_dir, entry))
-            and not entry.startswith(".")
-            and not entry.startswith("__")
+            entry.is_dir()
+            and not entry.name.startswith(".")
+            and not entry.name.startswith("__")
+            and entry.name.upper().startswith(("ASD", "JCS"))
         )
-    ]
-    return animals
+    )
 
 
 def _normalize_source_label(filename: str) -> str:
@@ -277,7 +381,15 @@ def _apply_rt_value_rules(merged_df, rt_value_edits):
     else:
         out["rt_value_valid"] = out["rt_value_valid"].fillna(True).astype(bool)
     if "rt_value_note" not in out.columns:
-        out["rt_value_note"] = pd.NA
+        out["rt_value_note"] = pd.Series(
+            pd.array([pd.NA] * len(out), dtype="string"),
+            index=out.index,
+        )
+    else:
+        # CSV imports turn an all-empty note column into float64. Coerce it
+        # explicitly before assigning text; pandas 3 raises instead of silently
+        # widening an incompatible numeric column.
+        out["rt_value_note"] = out["rt_value_note"].astype("string")
 
     for rule in rt_value_edits:
         setup_col = rule.get("setup_col", "box")
@@ -354,15 +466,24 @@ def _normalize_stakes_abl_from_ild(df, *, line=None):
     return out
 
 
-def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2", session_edits=None, rt_value_edits=None):
+def _merge_single_rat_session_files(
+    input_rat,
+    line="CNTNAP2",
+    cohort="cohort2",
+    session_edits=None,
+    rt_value_edits=None,
+    incremental=True,
+):
 
     """
-    Merge all raw session CSVs for one subject into merged_<rat>.csv
-    for a given line+cohort.
+    Merge raw session CSVs for one subject into merged_<rat>.csv.
+
+    When ``incremental`` is true and the local merged file already exists,
+    only raw files absent from its ``source_file`` column are appended.
     """
         
     base_dir = get_base_dir(line, cohort)
-    input_dir = os.path.join(base_dir, input_rat)
+    input_dir = str(get_local_raw_animal_dir(line, cohort, input_rat))
 
     folder_name = os.path.basename(os.path.normpath(input_dir))
     output_dir = base_dir
@@ -385,8 +506,33 @@ def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2",
     # Sort files by modification time (latest last)
     all_files.sort(key=lambda f: os.path.getmtime(os.path.join(input_dir, f)))
 
+    existing_df = None
+    files_to_merge = all_files
+    if incremental and os.path.isfile(output_file):
+        existing_df = pd.read_csv(output_file)
+        if "source_file" not in existing_df.columns:
+            raise ValueError(
+                f"Cannot incrementally update {output_file}: its source_file column is missing. "
+                "Run with incremental=False to rebuild it from the raw daily CSVs."
+            )
+        processed_sources = {
+            _normalize_source_label(source)
+            for source in existing_df["source_file"].dropna().astype(str)
+        }
+        files_to_merge = [
+            file for file in all_files
+            if _normalize_source_label(file) not in processed_sources
+        ]
+        print(
+            f"Incremental merge: {len(processed_sources)} source file(s) already "
+            f"in {os.path.basename(output_file)}; {len(files_to_merge)} new file(s) found."
+        )
+        if not files_to_merge:
+            print(f"✅ {folder_name} is already up to date; no local output was rewritten.")
+            return existing_df
+
     # Latest file defines reference columns and order
-    latest_file = all_files[-1]
+    latest_file = files_to_merge[-1]
     ref_path = os.path.join(input_dir, latest_file)
     ref_df = pd.read_csv(ref_path)
     reference_columns = list(ref_df.columns)
@@ -397,7 +543,7 @@ def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2",
     new_columns = set(reference_columns)
 
     # Collect any extra columns appearing in other files (added at the end)
-    for f in all_files[:-1]:  # skip the reference file since already handled
+    for f in files_to_merge[:-1]:  # skip the reference file since already handled
         try:
             cols = pd.read_csv(os.path.join(input_dir, f), nrows=0).columns
             for c in cols:
@@ -414,7 +560,7 @@ def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2",
         print("Added 'repeated_trial' to merged columns because a session edit uses mark_repeated_from.")
 
     # Merge all data
-    for file in all_files:
+    for file in files_to_merge:
         filepath = os.path.join(input_dir, file)
         try:
             matching_rules = _matching_session_rules(session_rules, file)
@@ -462,19 +608,39 @@ def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2",
             continue
 
     if merged_dataframes:
-        merged_df = pd.concat(merged_dataframes, ignore_index=True)
+        new_merged_df = pd.concat(merged_dataframes, ignore_index=True)
         session_order = (
-            merged_df[["__source_file", "__session_sort_key", "__session_mtime"]]
+            new_merged_df[["__source_file", "__session_sort_key", "__session_mtime"]]
             .drop_duplicates()
             .sort_values(["__session_sort_key", "__session_mtime"])
             .reset_index(drop=True)
         )
-        session_order["__new_session"] = range(1, len(session_order) + 1)
+        first_new_session = 1
+        if existing_df is not None and not existing_df.empty:
+            if "session" not in existing_df.columns:
+                raise ValueError(
+                    f"Cannot incrementally update {output_file}: its session column is missing."
+                )
+            existing_sessions = pd.to_numeric(existing_df["session"], errors="coerce")
+            if existing_sessions.notna().any():
+                first_new_session = int(existing_sessions.max()) + 1
+        session_order["__new_session"] = range(
+            first_new_session, first_new_session + len(session_order)
+        )
         map_new_session = dict(zip(session_order["__source_file"], session_order["__new_session"]))
 
-        merged_df["session"] = merged_df["__source_file"].map(map_new_session)
-        merged_df["source_file"] = merged_df["__source_file"]
-        merged_df["source_date"] = merged_df["__session_sort_key"]
+        new_merged_df["session"] = new_merged_df["__source_file"].map(map_new_session)
+        new_merged_df["source_file"] = new_merged_df["__source_file"]
+        new_merged_df["source_date"] = new_merged_df["__session_sort_key"]
+        new_merged_df = new_merged_df.drop(
+            columns=["__source_file", "__session_sort_key", "__session_mtime"],
+            errors="ignore",
+        )
+
+        if existing_df is not None:
+            merged_df = pd.concat([existing_df, new_merged_df], ignore_index=True, sort=False)
+        else:
+            merged_df = new_merged_df
         merged_df = _apply_rt_value_rules(merged_df, rt_value_edits)
 
         sort_cols = ["session"]
@@ -484,21 +650,28 @@ def _merge_single_rat_session_files(input_rat, line="CNTNAP2", cohort="cohort2",
 
         _validate_one_session_per_source(merged_df, source_col="source_file", session_col="session")
 
-        merged_df = merged_df.drop(columns=["__source_file", "__session_sort_key", "__session_mtime"], errors="ignore")
-
         merged_df.to_csv(output_file, index=False)
-        print(f"🎉 Merged {len(merged_dataframes)} files into {output_file}")
+        action = "Appended" if existing_df is not None else "Merged"
+        print(f"🎉 {action} {len(merged_dataframes)} new file(s) into {output_file}")
         print(f"Final shape: {merged_df.shape}")
 
         print("\nSession order check:")
         print(session_order[["__new_session", "__source_file", "__session_sort_key"]])
+        return merged_df
 
     else:
         print("❌ No files were successfully merged.")
         return  # <-- ensure function exits if nothing merged
 
 
-def merge_session_files(line="CNTNAP2", cohort="cohort2", rat=None, session_edits=None, rt_value_edits=None):
+def merge_session_files(
+    line="CNTNAP2",
+    cohort="cohort2",
+    rat=None,
+    session_edits=None,
+    rt_value_edits=None,
+    incremental=True,
+):
     """
     Merge raw session CSVs for either:
     - one rat, if rat is provided
@@ -522,6 +695,7 @@ def merge_session_files(line="CNTNAP2", cohort="cohort2", rat=None, session_edit
             cohort=cohort,
             session_edits=session_edits,
             rt_value_edits=rt_value_edits,
+            incremental=incremental,
         )
 """
    # --- NEW PART: merge into setup-level file ---
@@ -539,8 +713,28 @@ def merge_session_files(line="CNTNAP2", cohort="cohort2", rat=None, session_edit
 """
         
 def list_csv_files(input_dir):
-    """Return list of .csv files in a directory."""
-    return [f for f in os.listdir(input_dir) if f.endswith(".csv")]
+    """Return behavioural daily CSV paths relative to an animal directory.
+
+    Google Drive stores each daily CSV one level down in a session/day folder.
+    Flat CSVs are also accepted for backwards compatibility. Auxiliary CSVs
+    such as ``cam_metadata_*.csv`` are deliberately excluded.
+    """
+    input_path = Path(input_dir)
+    csv_paths = list(input_path.glob("*.csv"))
+    csv_paths.extend(input_path.glob("*/*.csv"))
+
+    def is_behaviour_output(path):
+        filename = path.name.lower()
+        is_output = filename.startswith("out_") or "_out_" in filename
+        is_preserved_old_version = filename.endswith("_problematic.csv")
+        is_staging_file = filename.endswith("_corrected_upload_pending.csv")
+        return is_output and not is_preserved_old_version and not is_staging_file
+
+    return sorted(
+        path.relative_to(input_path).as_posix()
+        for path in csv_paths
+        if is_behaviour_output(path)
+    )
 
 
 
@@ -698,6 +892,11 @@ if __name__ == "__main__":
         default=None,
         help="Optional model file used for all-subject merge",
     )
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Reprocess every daily CSV instead of appending only unseen source files.",
+    )
     args = parser.parse_args()
     animals = get_animals_for_cohort(args.line, args.cohort, rat=args.rat)
     if not animals:
@@ -705,7 +904,12 @@ if __name__ == "__main__":
 
     # --- run only what you asked for ---
     if args.mode in ("session", "both"):
-        merge_session_files(args.line, args.cohort, rat=args.rat)
+        merge_session_files(
+            args.line,
+            args.cohort,
+            rat=args.rat,
+            incremental=not args.rebuild,
+        )
 
     if args.mode in ("animals", "both"):
         merge_subject_files_with_model(line=args.line, cohort=args.cohort, model_file=args.model)

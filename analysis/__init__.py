@@ -1,6 +1,7 @@
 from .daily_merge import (
     get_animals_for_cohort,
     get_base_dir,
+    get_local_raw_animal_dir,
     merge_session_files,
     merge_subject_files_with_model,
 )
@@ -13,4 +14,3 @@ from .datasets import (
     load_line_across_cohorts,
     resolve_data_dir,
 )
-
